@@ -1,14 +1,15 @@
 # terminal-zoo
 
-ASCII動物をターミナル上でぬるぬるアニメーションさせるCLIツール。
+リッチなASCII動物アニメーションをターミナル上で表示するCLIツール。
+ratatui ベースで、グラデーション・パーティクル・星空背景付き。
 
 ## Build & Run
 
 ```bash
-make run       # デバッグビルド → 実行
-make debug     # RUST_BACKTRACE=1 付きで実行
-make release   # リリースビルド（最適化あり）
-make run-release # リリースバイナリ実行
+make run          # デバッグビルド → 実行
+make debug        # RUST_BACKTRACE=1 付きで実行
+make release      # リリースビルド（最適化あり）
+make run-release  # リリースバイナリ実行
 ```
 
 ## Development
@@ -25,17 +26,30 @@ make clean     # ビルド成果物削除
 ## Architecture
 
 - `src/main.rs` — 全ロジックを含むシングルファイル構成
-- `crossterm` — ターミナル制御（alternate screen, raw mode, cursor操作）
-- `rand` — 動物の初期位置・速度のランダム化
+- `ratatui` — TUIフレームワーク（レイアウト、ウィジェット、バッファ直接描画）
+- `crossterm` — ターミナルイベント制御
+- `color-eyre` — エラーハンドリング
+- `rand` — ランダム化
+
+## Visual Features
+
+- 背景グラデーション（上から下へ暗い紫〜紺）
+- 瞬く星空背景
+- 動物ごとの固有カラーグラデーション + シマー効果
+- ゴースト残像トレイル
+- バウンス時のパーティクルエフェクト
+- 常時発生するアンビエントパーティクル
+- フッターのレインボーグラデーションバー
 
 ## Key Bindings（実行中）
 
-- `a` — 動物を追加
-- `d` — 動物を削除
+- `a` / `Space` — 動物を追加
+- `d` / `Backspace` — 動物を削除
+- `r` — パーティクルバースト
 - `q` / `Esc` — 終了
 
 ## Notes
 
-- フレームレートは30FPS固定
-- 動物は壁で跳ね返る物理シミュレーション
+- フレームレート: ~30FPS（33ms tick）
+- 動物は壁で跳ね返る物理シミュレーション + 波動モーション
 - edition は 2021 を使用

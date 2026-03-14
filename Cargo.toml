@@ -1,9 +1,11 @@
 [package]
 name = "terminal-zoo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Smooth ASCII animal animations in your terminal"
+description = "Rich ASCII animal animations in your terminal with smooth gradients and particle effects"
 
 [dependencies]
+ratatui = "0.29"
 crossterm = "0.28"
+color-eyre = "0.6"
 rand = "0.8"
