@@ -1,7 +1,7 @@
 # terminal-zoo
 
-Ghosttyスタイルの大型ASCIIアート動物がぬるぬる浮遊するTUI。
-ratatui + 60fps + サイン波合成によるオーガニックな動き。
+可愛いASCIIアート動物がぬるぬる浮遊するTUI。
+ratatui + 60fps + サイン波合成による滑らかな動き。
 
 ## Build & Run
 
@@ -15,7 +15,7 @@ make run-release  # リリースバイナリ実行
 ## Development
 
 ```bash
-make check     # コンパイルチェックのみ（高速）
+make check     # コンパイルチェックのみ
 make fmt       # コードフォーマット
 make lint      # clippy でリント
 make test      # テスト実行
@@ -25,24 +25,27 @@ make clean     # ビルド成果物削除
 
 ## Architecture
 
-- `src/main.rs` — シングルファイル構成
+```
+src/
+├── main.rs              # App構造体、描画、イベントループ
+└── animals/
+    ├── mod.rs           # AnimalDef 構造体 + ANIMAL_DEFS 一覧
+    ├── cat.rs           # 猫のASCIIアート + 色定義
+    ├── dog.rs           # 犬
+    ├── fish.rs          # 魚
+    └── rabbit.rs        # うさぎ
+```
+
 - `ratatui` — TUIフレームワーク（バッファ直接描画）
 - `crossterm` — ターミナルイベント制御
 - `color-eyre` — エラーハンドリング
 - `rand` — パーティクル生成
 
-## Visual Features
+### 動物の追加方法
 
-- 大型ASCIIアート（25-30行）× 4種類（Cat, Dog, Fish, Rabbit）
-- 文字密度に応じた輝度マッピング（@=最明, .=最暗）
-- 3ストップカラーグラデーション（上→中→下）
-- 複数サイン波合成による滑らかな浮遊モーション
-- 行ごとの波うねりエフェクト
-- 呼吸アニメーション（目の開閉）
-- パルスグロー効果
-- 瞬く星空背景
-- アンビエントパーティクル
-- レインボーフッター
+1. `src/animals/` に新しいファイル（例: `penguin.rs`）を作成
+2. `ART_A`, `ART_B`（瞬き用）、`DEF` を定義
+3. `src/animals/mod.rs` に `mod penguin;` と `ANIMAL_DEFS` への追加
 
 ## Key Bindings
 
@@ -52,5 +55,6 @@ make clean     # ビルド成果物削除
 ## Notes
 
 - 60fps（16ms tick）
-- 位置はサイン波合成で算出（バウンスなし）
+- 複数サイン波合成によるオーガニックな浮遊
+- 背景なし（プレーン暗色）
 - edition 2021
