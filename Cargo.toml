@@ -1,0 +1,9 @@
+[package]
+name = "terminal-zoo"
+version = "0.1.0"
+edition = "2021"
+description = "Smooth ASCII animal animations in your terminal"
+
+[dependencies]
+crossterm = "0.28"
+rand = "0.8"

@@ -1,0 +1,44 @@
+.PHONY: run build debug release clean check fmt lint test
+
+# Default: build and run
+run: build
+	./target/debug/terminal-zoo
+
+# Debug build
+build:
+	cargo build
+
+# Debug build with RUST_BACKTRACE
+debug:
+	RUST_BACKTRACE=1 cargo run
+
+# Release build (optimized)
+release:
+	cargo build --release
+
+# Run release binary
+run-release: release
+	./target/release/terminal-zoo
+
+# Check compilation without building
+check:
+	cargo check
+
+# Format code
+fmt:
+	cargo fmt
+
+# Lint with clippy
+lint:
+	cargo clippy -- -D warnings
+
+# Run tests
+test:
+	cargo test
+
+# Clean build artifacts
+clean:
+	cargo clean
+
+# Format + lint + check
+ci: fmt lint check test
