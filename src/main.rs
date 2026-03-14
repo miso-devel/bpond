@@ -226,9 +226,31 @@ impl App {
                     continue;
                 }
 
+                // Character density → brightness (Ghostty style)
+                let weight = match ch {
+                    '@' => 1.0,
+                    '$' => 0.92,
+                    '%' => 0.82,
+                    '#' => 0.75,
+                    '*' => 0.65,
+                    '=' => 0.55,
+                    '+' => 0.45,
+                    'x' => 0.40,
+                    'o' => 0.35,
+                    '~' => 0.30,
+                    '-' => 0.25,
+                    ':' => 0.20,
+                    '·' | '\'' | '.' | ',' => 0.15,
+                    _ => 0.50,
+                };
+
+                let fr = (r as f64 * weight).min(255.0) as u8;
+                let fg = (g as f64 * weight).min(255.0) as u8;
+                let fb = (b as f64 * weight).min(255.0) as u8;
+
                 let cell = &mut buf[(px as u16, py as u16)];
                 cell.set_char(ch);
-                cell.set_fg(Color::Rgb(r, g, b));
+                cell.set_fg(Color::Rgb(fr, fg, fb));
                 cell.set_style(Style::default().add_modifier(Modifier::BOLD));
             }
         }
