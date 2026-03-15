@@ -1,4 +1,4 @@
-.PHONY: run build debug release clean check fmt lint test
+.PHONY: run build debug release clean check fmt lint test watch
 
 # Default: build and run
 run: build
@@ -39,6 +39,10 @@ test:
 # Clean build artifacts
 clean:
 	cargo clean
+
+# Watch: rebuild and run on file change
+watch:
+	cargo watch -x run
 
 # Format + lint + check
 ci: fmt lint check test
