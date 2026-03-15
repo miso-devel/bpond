@@ -6,59 +6,102 @@ use std::time::{Duration, Instant};
 
 const TICK: Duration = Duration::from_millis(16);
 
-// ─── Hand-drawn shark sprite ────────────────────────────────────────────────
-// Each character has a role: outline, fill, feature, or space
-// The sprite is designed to look good as ASCII art FIRST, then animated.
+// ─── Pixel-art style shark ──────────────────────────────────────────────────
+// Each character = 1 pixel. Colors encoded by character:
+//   # = body (dark blue-gray)
+//   = = body mid
+//   - = belly (light)
+//   @ = eye
+//   : = gill
+//   ^ = dorsal fin top
+//   > = tail tips
+//   . = outline/edge
+//   (space) = transparent
 
-const SHARK_SPRITE: &[&str] = &[
-    r"                /\                       ",
-    r"        _______/  \________              ",
-    r"      /       '    \       \____         ",
-    r"     / O    |  |  | \          \===      ",
-    r"    <       |  |  |  \          >===     ",
-    r"     \      |  |  |  /     ____/===      ",
-    r"      \_____,___,___/ ____/              ",
-    r"            \  /  \__/                   ",
-    r"             \/                          ",
+const SHARK_FRAMES: &[&[&str]] = &[
+    // Frame 0: tail center
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   .....######...........        ",
+        "  .####=====######=====##>.      ",
+        "  .##@#::---########---##=>>.    ",
+        "  .####=====######=====##>.      ",
+        "   ....`######...........        ",
+        "        `####`                   ",
+        "         `..`                    ",
+    ],
+    // Frame 1: tail up
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   ....`######`..........        ",
+        "  .####=====######=====##.>.     ",
+        "  .##@#::---########---###=>>.   ",
+        "  .####=====######=====##`       ",
+        "   ....`######`..........        ",
+        "        `####`                   ",
+        "         `..`                    ",
+    ],
+    // Frame 2: tail down
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   ....`######`..........        ",
+        "  .####=====######=====##`       ",
+        "  .##@#::---########---###=>>.   ",
+        "  .####=====######=====##.>.     ",
+        "   ....`######`..........        ",
+        "        `####`                   ",
+        "         `..`                    ",
+    ],
 ];
 
-const SHARK_W: usize = 42;
+const SHARK_W: usize = 34;
 const SHARK_H: usize = 9;
 
-// Color for each character type
-fn shark_color(ch: char, row: usize) -> Color {
-    let vert = row as f64 / SHARK_H as f64;
-    // Counter-shading: dark top, light bottom
-    let r = (50.0 + 115.0 * vert) as u8;
-    let g = (70.0 + 105.0 * vert) as u8;
-    let b = (120.0 + 75.0 * vert) as u8;
+fn shark_color(ch: char) -> Color {
     match ch {
-        'O' => Color::Rgb(230, 235, 245),              // eye
-        '|' => Color::Rgb(55, 70, 110),                 // gill slits
-        '=' | '>' => Color::Rgb(r / 2 + 40, g / 2 + 45, b / 2 + 55), // tail
-        '/' | '\\' | '_' | ',' | '\'' => Color::Rgb(r, g, b), // outline
-        '<' => Color::Rgb(r, g, b),                      // nose
-        _ => Color::Rgb(r, g, b),
+        '#' => Color::Rgb(75, 95, 145),
+        '=' => Color::Rgb(95, 115, 160),
+        '-' => Color::Rgb(170, 180, 200),
+        '@' => Color::Rgb(240, 245, 255),
+        ':' => Color::Rgb(50, 65, 105),
+        '^' => Color::Rgb(60, 80, 130),
+        '>' => Color::Rgb(70, 88, 138),
+        '.' => Color::Rgb(40, 55, 95),
+        '`' => Color::Rgb(40, 55, 95),
+        _ => Color::Rgb(75, 95, 145),
     }
 }
 
-// ─── Eel sprite ─────────────────────────────────────────────────────────────
+// ─── Eel ────────────────────────────────────────────────────────────────────
 
-const EEL_SPRITE: &[&str] = &[
-    r"  _____________________________________  ",
-    r" / o  :  :  :  ~~~~~~~~~~~~~~~~~~~~~~~~\ ",
-    r" \_________________________________~~~~/ ",
+const EEL_FRAMES: &[&[&str]] = &[
+    &[
+        " ..................................  ",
+        ".##@##::==#==#==#==#==#==#==#==#=>. ",
+        " ..................................  ",
+    ],
+    &[
+        "  ..................................  ",
+        " .##@##::==#==#==#==#==#==#==#==#=>. ",
+        " ...................................  ",
+    ],
 ];
 
-const EEL_W: usize = 42;
+const EEL_W: usize = 38;
 const EEL_H: usize = 3;
 
-fn eel_color(ch: char, _row: usize) -> Color {
+fn eel_color(ch: char) -> Color {
     match ch {
-        'o' => Color::Rgb(180, 200, 160),
-        ':' => Color::Rgb(35, 60, 40),
-        '~' => Color::Rgb(40, 85, 50),
-        _ => Color::Rgb(35, 75, 42),
+        '#' => Color::Rgb(40, 80, 48),
+        '=' => Color::Rgb(50, 95, 58),
+        '@' => Color::Rgb(180, 200, 160),
+        ':' => Color::Rgb(30, 55, 35),
+        '>' => Color::Rgb(45, 85, 52),
+        '.' => Color::Rgb(28, 50, 32),
+        _ => Color::Rgb(40, 80, 48),
     }
 }
 
@@ -66,38 +109,43 @@ fn eel_color(ch: char, _row: usize) -> Color {
 
 struct Creature {
     name: &'static str,
-    sprite: &'static [&'static str],
+    frames: &'static [&'static [&'static str]],
     width: usize,
     height: usize,
-    color_fn: fn(char, usize) -> Color,
-    wave_k: f64,     // spatial frequency
-    wave_speed: f64,  // temporal frequency
-    amp_head: f64,    // amplitude at head (cells)
-    amp_tail: f64,    // amplitude at tail (cells)
+    color_fn: fn(char) -> Color,
+    // Undulation params
+    wave_k: f64,
+    wave_speed: f64,
+    amp_head: f64,
+    amp_tail: f64,
+    // Frame animation speed (frames per second for sprite swap)
+    frame_fps: f64,
 }
 
 const CREATURES: &[Creature] = &[
     Creature {
         name: "Shark",
-        sprite: SHARK_SPRITE,
+        frames: SHARK_FRAMES,
         width: SHARK_W,
         height: SHARK_H,
         color_fn: shark_color,
-        wave_k: 5.0,
-        wave_speed: 2.8,
-        amp_head: 0.15,
-        amp_tail: 1.5,
+        wave_k: 4.5,
+        wave_speed: 2.5,
+        amp_head: 0.1,
+        amp_tail: 1.2,
+        frame_fps: 4.0,
     },
     Creature {
         name: "Eel",
-        sprite: EEL_SPRITE,
+        frames: EEL_FRAMES,
         width: EEL_W,
         height: EEL_H,
         color_fn: eel_color,
-        wave_k: 8.0,
+        wave_k: 7.0,
         wave_speed: 3.5,
-        amp_head: 0.5,
-        amp_tail: 3.0,
+        amp_head: 0.4,
+        amp_tail: 2.5,
+        frame_fps: 3.0,
     },
 ];
 
@@ -112,17 +160,18 @@ fn draw_creature(
 ) {
     let sx = (area.width as i32 - c.width as i32) / 2;
     let sy = (area.height as i32 - c.height as i32) / 2;
-
     let omega = 2.0 * PI * c.wave_speed * speed;
 
-    for (row, line) in c.sprite.iter().enumerate() {
-        for (col, ch) in line.chars().enumerate() {
-            if ch == ' ' {
-                continue;
-            }
+    // Select sprite frame based on time
+    let frame_idx = ((t * c.frame_fps * speed) as usize) % c.frames.len();
+    let sprite = c.frames[frame_idx];
 
-            // Wave: each column bends vertically, amplitude grows toward tail
-            let r = col as f64 / c.width as f64; // 0=head, 1=tail
+    for (row, line) in sprite.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if ch == ' ' { continue; }
+
+            // Wave bend: each column shifts vertically
+            let r = col as f64 / c.width as f64;
             let amp = c.amp_head + (c.amp_tail - c.amp_head) * r * r;
             let bend = (r * c.wave_k - omega * t).sin() * amp;
 
@@ -133,7 +182,7 @@ fn draw_creature(
                 continue;
             }
 
-            let fg = (c.color_fn)(ch, row);
+            let fg = (c.color_fn)(ch);
             let cell = &mut buf[(px as u16, py as u16)];
             cell.set_char(ch);
             cell.set_fg(fg);
@@ -142,7 +191,7 @@ fn draw_creature(
     }
 }
 
-// ─── App ────────────────────────────────────────────────────────────────────
+// ─── Main ───────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -158,7 +207,6 @@ fn main() -> Result<()> {
             let area = f.area();
             let buf = f.buffer_mut();
 
-            // Clear
             for y in 0..area.height {
                 for x in 0..area.width {
                     let cell = &mut buf[(x, y)];
@@ -168,14 +216,12 @@ fn main() -> Result<()> {
                 }
             }
 
-            let c = &CREATURES[current];
-            draw_creature(buf, area, c, elapsed, speed);
+            draw_creature(buf, area, &CREATURES[current], elapsed, speed);
 
-            // Header
             if area.height > 2 && area.width > 20 {
                 let hdr = format!(
                     "  terminal-zoo  {} ({}/{})  speed:{:.1}x  \u{2190}\u{2192}:switch  \u{2191}\u{2193}:speed  q:quit",
-                    c.name, current + 1, CREATURES.len(), speed
+                    CREATURES[current].name, current + 1, CREATURES.len(), speed
                 );
                 for (i, ch) in hdr.chars().enumerate() {
                     if i >= area.width as usize { break; }
