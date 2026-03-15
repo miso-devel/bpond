@@ -1,19 +1,26 @@
+mod bear;
 mod cat;
 mod dog;
-mod fish;
+mod owl;
+mod penguin;
 mod rabbit;
+mod shark;
 
 pub struct AnimalDef {
-    pub art_a: &'static [&'static str],
-    pub art_b: &'static [&'static str],
+    pub frames: &'static [&'static [&'static str]],
+    /// Animation sequence: (frame_index, duration_seconds)
+    pub sequence: &'static [(usize, f64)],
     pub name: &'static str,
     pub color_top: (u8, u8, u8),
     pub color_bot: (u8, u8, u8),
 }
 
 pub const ANIMAL_DEFS: &[AnimalDef] = &[
+    shark::DEF,
     cat::DEF,
     dog::DEF,
-    fish::DEF,
     rabbit::DEF,
+    penguin::DEF,
+    owl::DEF,
+    bear::DEF,
 ];
