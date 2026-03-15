@@ -28,116 +28,155 @@ impl Creature for SharkCfg {
 
     fn draw(&self, buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, t: f64) {
         let len: i32 = 48;
-        let base_half: f64 = 2.2; // base half-thickness in rows
+        let base_half: f64 = 2.0;
         let sx = (area.width as i32 - len) / 2;
         let cy = area.height as f64 / 2.0;
 
-        let k = 2.0 * PI / 38.0; // wavelength ~38 cols
+        let k = 2.0 * PI / 36.0;
         let omega = 2.0 * PI * 1.3;
 
-        // For each column: body center stays on cy,
-        // thickness oscillates to simulate lateral (horizontal) undulation
+        // Lateral wave: positive = body curves TOWARD viewer, negative = AWAY
+        let lateral_at = |col: i32, r: f64| -> f64 {
+            let envelope = 0.12 + 0.88 * r * r; // head participates slightly
+            (k * col as f64 - omega * t).sin() * envelope
+        };
+
         for col in 0..len {
             let r = col as f64 / len as f64;
             let px = sx + col;
             if px < 0 || px >= area.width as i32 { continue; }
 
-            // Taper at nose and tail
-            let taper = if r < 0.12 { r / 0.12 }
-                else if r > 0.82 { (1.0 - r) / 0.18 }
-                else { 1.0 };
+            let wave = lateral_at(col, r);
 
-            // Horizontal undulation: thickness pulsates (head→tail wave)
-            let envelope = r * r; // carangiform: tail-heavy
-            let wave = (k * col as f64 - omega * t).sin();
-            let thickness_mod = 1.0 + wave * 0.25 * envelope;
+            // PERSPECTIVE: toward viewer (+) = wider & brighter,
+            //              away (-) = thinner & dimmer
+            let perspective = 1.0 + wave * 0.55;
 
-            let half = base_half * taper * thickness_mod;
+            // Asymmetric shark profile:
+            // - Dorsal (top) side: rounded hump peaking at ~35% of body
+            // - Ventral (bottom) side: flatter, less bulge
+            // - Nose: rounded, not a sharp point
+            // - Tail: tapers smoothly
+            let dorsal_bulge = if r < 0.08 {
+                // Rounded nose
+                (r / 0.08).sqrt()
+            } else if r < 0.40 {
+                // Rising dorsal hump
+                1.0 + 0.4 * ((r - 0.08) / 0.32).sqrt()
+            } else if r < 0.82 {
+                // Gradual decline from hump
+                1.4 - 0.5 * ((r - 0.40) / 0.42)
+            } else {
+                // Tail taper
+                (1.0 - r) / 0.18 * 0.9
+            };
+            let ventral_bulge = if r < 0.08 {
+                (r / 0.08).sqrt()
+            } else if r > 0.82 {
+                (1.0 - r) / 0.18 * 0.8
+            } else {
+                // Flatter belly, slight bulge at mid-body
+                0.9 + 0.2 * (1.0 - ((r - 0.45) / 0.35).powi(2)).max(0.0)
+            };
 
-            // Slight vertical drift (the tail sweeps, shifting the center a tiny bit)
-            let v_drift = wave * 0.3 * envelope;
+            let half_top = base_half * dorsal_bulge * perspective.max(0.3);
+            let half_bot = base_half * ventral_bulge * perspective.max(0.3);
+
+            // Vertical drift: body center shifts slightly as it curves
+            let v_drift = wave * 0.4 * r;
             let center = cy + v_drift;
 
-            let top_exact = center - half;
-            let bot_exact = center + half;
+            let top_exact = center - half_top;
+            let bot_exact = center + half_bot;
             let top = top_exact.round() as i32;
             let bot = bot_exact.round() as i32;
 
-            // Slope for edge chars (how much the center drifts between columns)
-            let r_next = ((col + 1) as f64 / len as f64).min(1.0);
-            let env_next = r_next * r_next;
-            let wave_next = (k * (col + 1) as f64 - omega * t).sin();
-            let drift_next = wave_next * 0.3 * env_next;
-            let slope = drift_next - v_drift;
-
+            // Slope for edge direction
+            let wave_next = lateral_at((col + 1).min(len - 1), ((col + 1) as f64 / len as f64).min(1.0));
+            let drift_next = wave_next * 0.4 * ((col + 1) as f64 / len as f64).min(1.0);
+            let slope = (drift_next + cy) - (v_drift + cy);
             let (top_ch, bot_ch) = edge_chars(slope);
 
-            // AA hint
+            // AA hints
             let top_frac = (top_exact - top_exact.floor()).abs();
             let bot_frac = (bot_exact - bot_exact.floor()).abs();
             if top_frac > 0.25 && top_frac < 0.75 {
                 let hy = if top_exact < top as f64 { top - 1 } else { top + 1 };
-                set_c(buf, px, hy, '·', dim_color((50.0, 70.0, 120.0), 0.4), area);
+                set_c(buf, px, hy, '·', dim_color((50.0, 70.0, 120.0), 0.35), area);
             }
             if bot_frac > 0.25 && bot_frac < 0.75 {
                 let hy = if bot_exact > bot as f64 { bot + 1 } else { bot - 1 };
-                set_c(buf, px, hy, '·', dim_color((155.0, 170.0, 190.0), 0.4), area);
+                set_c(buf, px, hy, '·', dim_color((155.0, 170.0, 190.0), 0.35), area);
             }
+
+            // Brightness from perspective (closer = brighter)
+            let bright = (0.55 + 0.45 * perspective).clamp(0.3, 1.0);
+
+            // Fill density from perspective (closer = denser chars)
+            let fill_threshold_dense = if perspective > 0.9 { 0.5 } else { 0.9 };
+            let fill_threshold_mid = if perspective > 0.9 { 0.2 } else { 0.6 };
 
             for py in top..=bot {
                 let vert = if top == bot { 0.5 }
                     else { (py - top) as f64 / (bot - top) as f64 };
                 let depth = (0.5 - (vert - 0.5).abs()) * 2.0;
 
-                // Counter-shading
                 let cr = 50.0 + 112.0 * vert;
                 let cg = 70.0 + 105.0 * vert;
                 let cb = 120.0 + 72.0 * vert;
 
-                // Thickness modulation → brightness pulse (thicker = brighter, like light hitting wider surface)
-                let bright = 0.85 + 0.15 * thickness_mod;
-
                 let (ch, fg) = if top == bot {
                     ('<', Color::Rgb((cr * bright) as u8, (cg * bright) as u8, (cb * bright) as u8))
                 } else if py == top {
-                    (top_ch, Color::Rgb((50.0 * bright) as u8, (70.0 * bright) as u8, (120.0 * bright) as u8))
+                    (top_ch, Color::Rgb(
+                        (50.0 * bright) as u8, (70.0 * bright) as u8, (120.0 * bright) as u8))
                 } else if py == bot {
-                    (bot_ch, Color::Rgb((155.0 * bright) as u8, (170.0 * bright) as u8, (190.0 * bright) as u8))
-                } else if depth > 0.7 {
+                    (bot_ch, Color::Rgb(
+                        (155.0 * bright) as u8, (170.0 * bright) as u8, (190.0 * bright) as u8))
+                } else if depth > fill_threshold_dense {
                     ('=', Color::Rgb((cr * bright) as u8, (cg * bright) as u8, (cb * bright) as u8))
-                } else if depth > 0.3 {
-                    ('·', Color::Rgb((cr * bright * 0.8) as u8, (cg * bright * 0.8) as u8, (cb * bright * 0.8) as u8))
+                } else if depth > fill_threshold_mid {
+                    ('·', Color::Rgb((cr * bright * 0.7) as u8, (cg * bright * 0.7) as u8, (cb * bright * 0.7) as u8))
+                } else if perspective > 0.85 {
+                    (' ', Color::Rgb(8, 10, 18))
                 } else {
+                    // Body section curving away — skip interior (looks thinner/flatter)
                     (' ', Color::Rgb(8, 10, 18))
                 };
                 if ch != ' ' { set_c(buf, px, py, ch, fg, area); }
             }
 
-            // Dorsal fin
+            // Dorsal fin (also scales with perspective)
             if r > 0.28 && r < 0.48 {
-                let fh = (1.0 - ((r - 0.38) / 0.10).powi(2)).max(0.0) * 2.5;
+                let fh = (1.0 - ((r - 0.38) / 0.10).powi(2)).max(0.0)
+                    * 2.5 * perspective.max(0.5);
                 for h in 1..=(fh.ceil() as i32) {
                     let ch = if h == fh.ceil() as i32 { '/' } else { '|' };
-                    set_c(buf, px, top - h, ch, Color::Rgb(50, 70, 120), area);
+                    set_c(buf, px, top - h, ch,
+                        Color::Rgb((50.0 * bright) as u8, (70.0 * bright) as u8, (120.0 * bright) as u8), area);
                 }
             }
             // Pectoral fin
             if r > 0.32 && r < 0.46 {
-                let fh = (1.0 - ((r - 0.39) / 0.07).powi(2)).max(0.0) * 1.2;
+                let fh = (1.0 - ((r - 0.39) / 0.07).powi(2)).max(0.0)
+                    * 1.2 * perspective.max(0.5);
                 for h in 1..=(fh.ceil() as i32) {
                     let ch = if h == fh.ceil() as i32 { '\\' } else { '|' };
-                    set_c(buf, px, bot + h, ch, Color::Rgb(150, 165, 185), area);
+                    set_c(buf, px, bot + h, ch,
+                        Color::Rgb((155.0 * bright) as u8, (170.0 * bright) as u8, (190.0 * bright) as u8), area);
                 }
             }
             // Tail fork
             if r > 0.88 {
-                let spread = ((r - 0.88) / 0.12 * 3.0) as i32;
-                set_c(buf, px, top - spread, '/', Color::Rgb(50, 70, 120), area);
-                set_c(buf, px, bot + spread, '\\', Color::Rgb(145, 160, 182), area);
+                let spread = ((r - 0.88) / 0.12 * 3.0 * perspective.max(0.4)) as i32;
+                set_c(buf, px, top - spread, '/',
+                    Color::Rgb((50.0 * bright) as u8, (70.0 * bright) as u8, (120.0 * bright) as u8), area);
+                set_c(buf, px, bot + spread, '\\',
+                    Color::Rgb((145.0 * bright) as u8, (160.0 * bright) as u8, (182.0 * bright) as u8), area);
             }
         }
 
-        // Eye
+        // Eye (at head, mostly unaffected by wave)
         let eye_x = sx + (len as f64 * 0.12).round() as i32;
         let eye_y = (cy - 0.3).round() as i32;
         set_c(buf, eye_x, eye_y, 'O', Color::Rgb(230, 235, 245), area);
