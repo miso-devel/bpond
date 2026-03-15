@@ -93,8 +93,8 @@ impl App {
                     '|' => Color::Rgb(80, 100, 140),
                     _ => {
                         // Gradient: lighter at head, darker toward tail
-                        let v = (180.0 - 60.0 * col_ratio) as u8;
-                        Color::Rgb(v / 2, v * 2 / 3, v)
+                        let v = 180.0 - 60.0 * col_ratio;
+                        Color::Rgb((v * 0.5) as u8, (v * 0.66) as u8, v as u8)
                     }
                 };
 
