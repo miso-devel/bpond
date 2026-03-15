@@ -1,8 +1,10 @@
 mod animals;
+mod ghost_anim;
 
-use animals::ANIMAL_DEFS;
+use animals::{AnimalDef, ANIMAL_DEFS};
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ghost_anim::GhostAnimation;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -17,35 +19,44 @@ const TICK_RATE: Duration = Duration::from_millis(16); // ~60fps
 // ─── App ────────────────────────────────────────────────────────────────────
 
 struct App {
-    current_animal: usize,
+    /// 0 = Ghost (special gostty-style animation), 1..N = ANIMAL_DEFS[0..N-1]
+    current: usize,
+    total: usize,
     exit: bool,
     elapsed: f64,
-    base_x: f64,
-    base_y: f64,
+    ghost: GhostAnimation,
+    center_x: i32,
+    center_y: i32,
 }
 
 impl App {
     fn new(cols: u16, rows: u16) -> Self {
-        let art = ANIMAL_DEFS[0].art_a;
-        let art_w = art.iter().map(|l| l.len()).max().unwrap_or(0) as f64;
-        let art_h = art.len() as f64;
+        let ghost = GhostAnimation::load();
+        let total = 1 + ANIMAL_DEFS.len(); // ghost + regular animals
 
         App {
-            current_animal: 0,
+            current: 0,
+            total,
             exit: false,
             elapsed: 0.0,
-            base_x: (cols as f64 - art_w) / 2.0,
-            base_y: (rows as f64 - art_h) / 2.0,
+            ghost,
+            center_x: (cols as i32 - 77) / 2, // ghost width
+            center_y: (rows as i32 - 41) / 2,  // ghost height
         }
     }
 
     fn recenter(&mut self) {
         let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        let art = ANIMAL_DEFS[self.current_animal].art_a;
-        let art_w = art.iter().map(|l| l.len()).max().unwrap_or(0) as f64;
-        let art_h = art.len() as f64;
-        self.base_x = (cols as f64 - art_w) / 2.0;
-        self.base_y = (rows as f64 - art_h) / 2.0;
+        if self.current == 0 {
+            self.center_x = (cols as i32 - 77) / 2;
+            self.center_y = (rows as i32 - 41) / 2;
+        } else {
+            let art = ANIMAL_DEFS[self.current - 1].frames[0];
+            let art_w = art.iter().map(|l| l.len()).max().unwrap_or(0) as i32;
+            let art_h = art.len() as i32;
+            self.center_x = (cols as i32 - art_w) / 2;
+            self.center_y = (rows as i32 - art_h) / 2;
+        }
     }
 
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
@@ -74,14 +85,14 @@ impl App {
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.exit = true,
             KeyCode::Right | KeyCode::Char('n') => {
-                self.current_animal = (self.current_animal + 1) % ANIMAL_DEFS.len();
+                self.current = (self.current + 1) % self.total;
                 self.recenter();
             }
             KeyCode::Left | KeyCode::Char('p') => {
-                self.current_animal = if self.current_animal == 0 {
-                    ANIMAL_DEFS.len() - 1
+                self.current = if self.current == 0 {
+                    self.total - 1
                 } else {
-                    self.current_animal - 1
+                    self.current - 1
                 };
                 self.recenter();
             }
@@ -89,19 +100,35 @@ impl App {
         }
     }
 
-    /// Multiple sine waves for organic floating motion
-    fn smooth_offset(&self) -> (f64, f64) {
-        let t = self.elapsed;
-        let dx = (t * 0.5).sin() * 4.0 + (t * 0.23).sin() * 2.5 + (t * 0.11).cos() * 1.5;
-        let dy = (t * 0.37).sin() * 3.0 + (t * 0.17).cos() * 2.0 + (t * 0.08).sin() * 1.5;
-        (dx, dy)
+    fn current_frame<'a>(&self, def: &'a AnimalDef) -> &'a [&'a str] {
+        let total: f64 = def.sequence.iter().map(|&(_, d)| d).sum();
+        let pos = self.elapsed % total;
+        let mut acc = 0.0;
+        for &(idx, dur) in def.sequence {
+            acc += dur;
+            if pos < acc {
+                return def.frames[idx];
+            }
+        }
+        def.frames[0]
     }
 
     fn draw(&self, frame: &mut Frame) {
+        if self.current == 0 {
+            // Ghost: gostty-style 235-frame playback
+            self.ghost.draw(frame, self.elapsed);
+        } else {
+            // Regular animals
+            self.draw_animal(frame);
+        }
+    }
+
+    fn draw_animal(&self, frame: &mut Frame) {
         let area = frame.area();
         let buf = frame.buffer_mut();
+        let t = self.elapsed;
 
-        // Dark background — set once, ratatui diffs the rest
+        // Dark background
         for y in 0..area.height {
             for x in 0..area.width {
                 let cell = &mut buf[(x, y)];
@@ -111,25 +138,56 @@ impl App {
             }
         }
 
-        // Animal
-        let def = &ANIMAL_DEFS[self.current_animal];
-        let (dx, dy) = self.smooth_offset();
-
-        // Blink: eyes close briefly every ~4s
-        let blink_cycle = (self.elapsed * 0.25 * std::f64::consts::TAU).sin();
-        let art = if blink_cycle > 0.92 { def.art_b } else { def.art_a };
+        let def = &ANIMAL_DEFS[self.current - 1];
+        let art = self.current_frame(def);
 
         let art_h = art.len();
-        let ax = (self.base_x + dx).round() as i32;
-        let ay = (self.base_y + dy).round() as i32;
+        let ax = self.center_x;
+        let ay = self.center_y;
 
+        // Breathing
+        let breath = 0.78 + 0.22 * (t * 0.8).sin();
+        let wave_pos = 0.5 + 0.4 * (t * 0.5).sin();
+        let glow_strength = 0.08 + 0.06 * (t * 1.2).sin();
+
+        // Pass 1: Glow aura
         for (row, line) in art.iter().enumerate() {
             let row_ratio = row as f64 / art_h.max(1) as f64;
-
-            // Top-to-bottom color gradient
             let r = lerp_u8(def.color_top.0, def.color_bot.0, row_ratio);
             let g = lerp_u8(def.color_top.1, def.color_bot.1, row_ratio);
             let b = lerp_u8(def.color_top.2, def.color_bot.2, row_ratio);
+
+            for (col, ch) in line.chars().enumerate() {
+                if ch != ' ' || !has_art_neighbor(art, row, col) {
+                    continue;
+                }
+                let px = ax + col as i32;
+                let py = ay + row as i32;
+                if !in_bounds(px, py, area) {
+                    continue;
+                }
+                let glow = glow_strength
+                    * (0.8 + 0.2 * (t * 1.5 + row as f64 * 0.12 + col as f64 * 0.08).sin());
+                let gr = (r as f64 * glow).min(255.0) as u8;
+                let gg = (g as f64 * glow).min(255.0) as u8;
+                let gb = (b as f64 * glow).min(255.0) as u8;
+                if gr > 0 || gg > 0 || gb > 0 {
+                    let cell = &mut buf[(px as u16, py as u16)];
+                    cell.set_char('·');
+                    cell.set_fg(Color::Rgb(gr, gg, gb));
+                }
+            }
+        }
+
+        // Pass 2: Main art
+        for (row, line) in art.iter().enumerate() {
+            let row_ratio = row as f64 / art_h.max(1) as f64;
+            let r = lerp_u8(def.color_top.0, def.color_bot.0, row_ratio);
+            let g = lerp_u8(def.color_top.1, def.color_bot.1, row_ratio);
+            let b = lerp_u8(def.color_top.2, def.color_bot.2, row_ratio);
+
+            let wave_dist = (row_ratio - wave_pos).abs();
+            let wave_boost = 1.0 + 0.25 * (1.0 - (wave_dist * 3.0).min(1.0)).max(0.0);
 
             for (col, ch) in line.chars().enumerate() {
                 if ch == ' ' {
@@ -137,40 +195,44 @@ impl App {
                 }
                 let px = ax + col as i32;
                 let py = ay + row as i32;
-                if px < 0 || py < 0 || px >= area.width as i32 || py >= area.height as i32 {
+                if !in_bounds(px, py, area) {
                     continue;
                 }
 
-                // Character density → brightness
-                let weight = match ch {
-                    '@' => 1.0,
-                    '$' => 0.90,
-                    '%' => 0.78,
-                    '#' => 0.70,
-                    '*' => 0.60,
-                    '=' => 0.50,
-                    '+' => 0.40,
-                    'x' => 0.35,
-                    'o' => 0.30,
-                    '~' => 0.25,
-                    '-' => 0.22,
-                    ':' => 0.18,
-                    '·' | '.' | '\'' | ',' => 0.12,
-                    _ => 0.45,
+                let on_edge = is_edge_char(art, row, col);
+                let (display_ch, base_weight) = if on_edge {
+                    animate_edge_char(ch, t, row, col)
+                } else {
+                    (ch, char_weight(ch))
                 };
 
-                let fr = (r as f64 * weight).min(255.0) as u8;
-                let fg = (g as f64 * weight).min(255.0) as u8;
-                let fb = (b as f64 * weight).min(255.0) as u8;
+                let phase = col as f64 * 0.12 + row as f64 * 0.08;
+                let shimmer = 0.88 + 0.12 * (t * 2.0 + phase).sin();
+                let weight = base_weight * breath * shimmer * wave_boost;
+
+                let fr = (r as f64 * weight).clamp(0.0, 255.0) as u8;
+                let fg = (g as f64 * weight).clamp(0.0, 255.0) as u8;
+                let fb = (b as f64 * weight).clamp(0.0, 255.0) as u8;
 
                 let cell = &mut buf[(px as u16, py as u16)];
-                cell.set_char(ch);
+                cell.set_char(display_ch);
                 cell.set_fg(Color::Rgb(fr, fg, fb));
                 cell.set_style(Style::default().add_modifier(Modifier::BOLD));
             }
         }
 
-        // Minimal header
+        // Header
+        self.draw_header(frame, def.name, def.color_top, def.color_bot);
+    }
+
+    fn draw_header(
+        &self,
+        frame: &mut Frame,
+        name: &str,
+        color_top: (u8, u8, u8),
+        color_bot: (u8, u8, u8),
+    ) {
+        let area = frame.area();
         let header_area = Rect::new(0, 0, area.width, 3);
         let header_block = Block::default()
             .borders(Borders::BOTTOM)
@@ -188,11 +250,11 @@ impl App {
                 ),
                 Span::styled("  ", Style::default()),
                 Span::styled(
-                    def.name,
+                    name,
                     Style::default().fg(Color::Rgb(
-                        def.color_top.0 / 2 + def.color_bot.0 / 2,
-                        def.color_top.1 / 2 + def.color_bot.1 / 2,
-                        def.color_top.2 / 2 + def.color_bot.2 / 2,
+                        color_top.0 / 2 + color_bot.0 / 2,
+                        color_top.1 / 2 + color_bot.1 / 2,
+                        color_top.2 / 2 + color_bot.2 / 2,
                     )),
                 ),
             ]),
@@ -217,6 +279,70 @@ impl App {
         .block(header_block);
         frame.render_widget(header, header_area);
     }
+}
+
+fn char_weight(ch: char) -> f64 {
+    match ch {
+        '@' => 1.0,
+        '$' => 0.90,
+        '%' => 0.78,
+        '#' => 0.70,
+        '*' => 0.60,
+        '=' => 0.50,
+        '+' => 0.40,
+        'x' => 0.35,
+        'o' => 0.30,
+        '~' => 0.25,
+        '-' => 0.22,
+        ':' => 0.18,
+        '·' | '.' | '\'' | ',' => 0.12,
+        _ => 0.45,
+    }
+}
+
+fn animate_edge_char(ch: char, t: f64, row: usize, col: usize) -> (char, f64) {
+    let wave = (t * 1.8 + row as f64 * 0.2 + col as f64 * 0.12).sin();
+    let c = match ch {
+        '·' | '.' => if wave > 0.3 { '+' } else { '·' },
+        '+' => if wave > 0.33 { '*' } else if wave < -0.33 { '·' } else { '+' },
+        '*' => if wave > 0.33 { '=' } else if wave < -0.33 { '+' } else { '*' },
+        '=' => if wave > 0.33 { '%' } else if wave < -0.33 { '*' } else { '=' },
+        '%' => if wave > 0.33 { '$' } else if wave < -0.33 { '=' } else { '%' },
+        _ => ch,
+    };
+    (c, char_weight(c))
+}
+
+fn is_edge_char(art: &[&str], row: usize, col: usize) -> bool {
+    const DIRS: [(i32, i32); 8] = [
+        (-1, -1), (-1, 0), (-1, 1), (0, -1),
+        (0, 1), (1, -1), (1, 0), (1, 1),
+    ];
+    for &(dr, dc) in &DIRS {
+        let nr = row as i32 + dr;
+        let nc = col as i32 + dc;
+        if nr < 0 || nr >= art.len() as i32 { return true; }
+        let line = art[nr as usize];
+        if nc < 0 || nc >= line.len() as i32 { return true; }
+        if line.as_bytes()[nc as usize] == b' ' { return true; }
+    }
+    false
+}
+
+fn in_bounds(x: i32, y: i32, area: Rect) -> bool {
+    x >= 0 && y >= 0 && x < area.width as i32 && y < area.height as i32
+}
+
+fn has_art_neighbor(art: &[&str], row: usize, col: usize) -> bool {
+    for &(dr, dc) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+        let nr = row as i32 + dr;
+        let nc = col as i32 + dc;
+        if nr < 0 || nr >= art.len() as i32 { continue; }
+        let line = art[nr as usize];
+        if nc < 0 || nc >= line.len() as i32 { continue; }
+        if line.as_bytes()[nc as usize] != b' ' { return true; }
+    }
+    false
 }
 
 fn lerp_u8(a: u8, b: u8, t: f64) -> u8 {
