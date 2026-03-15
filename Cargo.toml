@@ -1,11 +1,10 @@
 [package]
 name = "terminal-zoo"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Smooth ASCII animal animations in your terminal"
+description = "Procedural ASCII art animation using SDF"
 
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
 color-eyre = "0.6"
-serde_json = "1"
