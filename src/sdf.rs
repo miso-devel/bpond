@@ -80,28 +80,35 @@ pub fn ghost_features(x: f64, y: f64, t: f64) -> Option<(char, Color)> {
 // The entire body bends with a sine wave that travels nose-to-tail,
 // creating a natural fish swimming motion.
 
+/// Shark SDF: small torpedo with fish-like undulation.
+/// Coordinates are scaled 2x internally so the shark renders at ~1/4 area.
 pub fn shark(x: f64, y: f64, t: f64) -> f64 {
-    // === Undulation: bend the coordinate space ===
-    // A sine wave displaces y based on x position, traveling from head to tail.
-    // Amplitude increases toward the tail (fish physics).
-    let tail_factor = ((x + 0.5) * 0.8).clamp(0.0, 1.0); // 0 at nose, 1 at tail
-    let bend = (x * 4.0 + t * 4.0).sin() * 0.08 * tail_factor * tail_factor;
-    let y = y - bend;
+    let (x, y) = (x * 2.0, y * 2.0);
+    shark_inner(x, y, t) * 0.5 // scale distance back for correct aura thresholds
+}
 
-    // === Body: tapered ellipse (torpedo shape) ===
-    // Wider at center, narrows toward both ends
+pub fn shark_features(x: f64, y: f64, t: f64) -> Option<(char, Color)> {
+    let (x, y) = (x * 2.0, y * 2.0);
+    shark_features_inner(x, y, t)
+}
+
+/// Undulation helper: bend y based on x position (head→tail wave).
+fn shark_bend(x: f64, t: f64) -> f64 {
+    let tail_factor = ((x + 0.5) * 0.8).clamp(0.0, 1.0);
+    (x * 4.0 + t * 4.0).sin() * 0.08 * tail_factor * tail_factor
+}
+
+fn shark_inner(x: f64, y: f64, t: f64) -> f64 {
+    let y = y - shark_bend(x, t);
+
     let body = ellipse(x, y, 0.0, 0.0, 0.50, 0.14);
 
-    // === Tail fin: triangle at the back ===
-    // Two angled ellipses forming a V
     let tail_bend = (t * 4.0).sin() * 0.06;
     let tail_top = ellipse(x, y, 0.52, -0.10 + tail_bend, 0.12, 0.04);
     let tail_bot = ellipse(x, y, 0.52, 0.10 + tail_bend, 0.12, 0.04);
 
-    // === Dorsal fin: triangle on top ===
     let dorsal = ellipse(x, y, 0.05, -0.18, 0.08, 0.06);
 
-    // === Pectoral fins: small, on sides ===
     let pec_bend = (t * 3.0).sin() * 0.015;
     let pec = ellipse(x, y, -0.10, 0.14 + pec_bend, 0.10, 0.03);
 
@@ -111,7 +118,6 @@ pub fn shark(x: f64, y: f64, t: f64) -> f64 {
     d = smooth_union(d, dorsal, 0.03);
     d = smooth_union(d, pec, 0.03);
 
-    // === Eye: small hole ===
     let blink = (t * 0.25).sin();
     let eye_h = if blink > 0.96 { 0.003 } else { 0.02 };
     d = subtract(d, ellipse(x, y, -0.30, -0.03, 0.025, eye_h));
@@ -119,10 +125,8 @@ pub fn shark(x: f64, y: f64, t: f64) -> f64 {
     d
 }
 
-pub fn shark_features(x: f64, y: f64, t: f64) -> Option<(char, Color)> {
-    let tail_factor = ((x + 0.5) * 0.8).clamp(0.0, 1.0);
-    let bend = (x * 4.0 + t * 4.0).sin() * 0.08 * tail_factor * tail_factor;
-    let y = y - bend;
+fn shark_features_inner(x: f64, y: f64, t: f64) -> Option<(char, Color)> {
+    let y = y - shark_bend(x, t);
 
     let blink = (t * 0.25).sin();
     if blink > 0.96 {
@@ -132,16 +136,13 @@ pub fn shark_features(x: f64, y: f64, t: f64) -> Option<(char, Color)> {
         return None;
     }
 
-    // Pupil
     if circle(x, y, -0.30, -0.03, 0.012) < 0.0 {
         return Some(('@', Color::Rgb(10, 15, 30)));
     }
-    // Eye white
     if ellipse(x, y, -0.30, -0.03, 0.022, 0.018) < 0.0 {
         return Some(('O', Color::Rgb(220, 225, 235)));
     }
 
-    // Gill slits — 3 small lines
     for i in 0..3 {
         let gx = -0.18 + i as f64 * 0.04;
         if ellipse(x, y, gx, 0.0, 0.003, 0.04) < 0.0 {
