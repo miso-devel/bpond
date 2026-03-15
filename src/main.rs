@@ -1,5 +1,3 @@
-mod sdf;
-
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
@@ -8,7 +6,21 @@ use ratatui::{
 };
 use std::time::{Duration, Instant};
 
-const TICK: Duration = Duration::from_millis(16); // ~60fps
+const TICK: Duration = Duration::from_millis(16);
+
+// Simple shark as line art: each row is (y_offset, string)
+// Facing left, dorsal fin on top, tail on right
+const SHARK: &[&str] = &[
+    r"            /\            ",
+    r"       ____/  \___        ",
+    r"  ____/    '   \  \____   ",
+    r" /  O    |  |  |       \==",
+    r" \____   |  |  |   ___/==",
+    r"      \____.___\__/       ",
+];
+
+const SHARK_W: usize = 28;
+const SHARK_H: usize = 6;
 
 struct App {
     exit: bool,
@@ -40,39 +52,61 @@ impl App {
         let area = frame.area();
         let buf = frame.buffer_mut();
         let t = self.elapsed;
-        let w = area.width as f64;
-        let h = area.height as f64;
-        let aspect = 0.5; // terminal cells are ~2x taller than wide
 
+        // Dark background
         for y in 0..area.height {
             for x in 0..area.width {
-                let nx = (x as f64 - w / 2.0) * aspect / (h / 2.0);
-                let ny = (y as f64 - h / 2.0) / (h / 2.0);
+                let cell = &mut buf[(x, y)];
+                cell.set_char(' ');
+                cell.set_bg(Color::Rgb(10, 10, 20));
+                cell.set_fg(Color::Rgb(10, 10, 20));
+            }
+        }
 
-                // Features layer (eyes, gills) — drawn on top
-                if let Some((fch, fcolor)) = sdf::shark_features(nx, ny, t) {
-                    let cell = &mut buf[(x, y)];
-                    cell.set_char(fch);
-                    cell.set_fg(fcolor);
-                    cell.set_bg(Color::Rgb(10, 8, 16));
-                    cell.set_style(Style::default());
+        // Center the shark
+        let cx = (area.width as i32 - SHARK_W as i32) / 2;
+        let cy = (area.height as i32 - SHARK_H as i32) / 2;
+
+        for (row, line) in SHARK.iter().enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                if ch == ' ' {
                     continue;
                 }
 
-                // Body SDF → outline-focused rendering
-                let d = sdf::shark(nx, ny, t);
-                let (ch, fg) = sdf::shark_render(d, t, nx, ny);
+                // Undulation: sine wave bends each column, stronger toward tail
+                let col_ratio = col as f64 / SHARK_W as f64; // 0=left(head), 1=right(tail)
+                let bend = (col_ratio * 3.0 + t * 3.5).sin()
+                    * 1.8
+                    * col_ratio
+                    * col_ratio;
 
-                let cell = &mut buf[(x, y)];
+                let px = cx + col as i32;
+                let py = cy + row as i32 + bend.round() as i32;
+
+                if px < 0 || py < 0 || px >= area.width as i32 || py >= area.height as i32 {
+                    continue;
+                }
+
+                let color = match ch {
+                    'O' => Color::Rgb(220, 230, 240),
+                    '=' => Color::Rgb(120, 140, 170),
+                    '|' => Color::Rgb(80, 100, 140),
+                    _ => {
+                        // Gradient: lighter at head, darker toward tail
+                        let v = (180.0 - 60.0 * col_ratio) as u8;
+                        Color::Rgb(v / 2, v * 2 / 3, v)
+                    }
+                };
+
+                let cell = &mut buf[(px as u16, py as u16)];
                 cell.set_char(ch);
-                cell.set_fg(fg);
-                cell.set_bg(Color::Rgb(10, 8, 16));
+                cell.set_fg(color);
                 cell.set_style(Style::default());
             }
         }
 
         // Header
-        if area.height > 2 && area.width > 30 {
+        if area.height > 2 && area.width > 20 {
             let hdr = "  terminal-zoo  Shark    q quit";
             for (i, ch) in hdr.chars().enumerate() {
                 if i >= area.width as usize {
@@ -80,7 +114,7 @@ impl App {
                 }
                 let cell = &mut buf[(i as u16, 0)];
                 cell.set_char(ch);
-                cell.set_fg(Color::Rgb(80, 70, 120));
+                cell.set_fg(Color::Rgb(60, 55, 90));
             }
         }
     }
