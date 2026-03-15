@@ -64,6 +64,7 @@ impl App {
             let r = col as f64 / shark_len as f64;
             let cy = cy_at(r);
 
+            // Body thickness: tapers at nose and tail
             let half = if r < 0.12 {
                 r / 0.12 * 2.0
             } else if r > 0.82 {
@@ -81,31 +82,57 @@ impl App {
             let bot = (cy + half).round() as i32;
 
             for py in top..=bot {
-                let at_edge = py == top || py == bot;
-                let (ch, fg) = if r < 0.02 {
-                    ('<', Color::Rgb(130, 150, 185))
-                } else if at_edge {
-                    ('-', Color::Rgb(100, 125, 165))
+                // Vertical position within body: 0.0=top, 1.0=bottom
+                let vert = if top == bot {
+                    0.5
                 } else {
-                    (' ', Color::Rgb(8, 10, 18))
+                    (py - top) as f64 / (bot - top) as f64
+                };
+
+                // Counter-shading: dark dorsal → light belly
+                let sr = (55.0 + 110.0 * vert) as u8;
+                let sg = (75.0 + 100.0 * vert) as u8;
+                let sb = (125.0 + 60.0 * vert) as u8;
+
+                let (ch, fg) = if top == bot {
+                    // Nose tip (single-cell width)
+                    ('<', Color::Rgb(sr, sg, sb))
+                } else if py == top {
+                    // Top edge — dark outline
+                    ('-', Color::Rgb(60, 80, 130))
+                } else if py == bot {
+                    // Bottom edge — lighter outline
+                    ('-', Color::Rgb(145, 158, 180))
+                } else {
+                    // Body interior — gradient fill
+                    ('~', Color::Rgb(sr, sg, sb))
                 };
                 set(buf, px, py, ch, fg, area);
             }
 
-            // Dorsal fin
+            // ── Dorsal fin (top) ──
             if r > 0.28 && r < 0.48 {
                 let fh = (1.0 - ((r - 0.38) / 0.10).powi(2)).max(0.0) * 2.5;
                 for h in 1..=(fh.ceil() as i32) {
-                    let ch = if h == 1 { '/' } else { '|' };
-                    set(buf, px, top - h, ch, Color::Rgb(90, 112, 150), area);
+                    let ch = if h == fh.ceil() as i32 { '/' } else { '|' };
+                    set(buf, px, top - h, ch, Color::Rgb(65, 85, 135), area);
                 }
             }
 
-            // Tail fork
-            if r > 0.90 {
-                let spread = ((r - 0.90) / 0.10 * 2.5) as i32;
-                set(buf, px, top - spread, '/', Color::Rgb(85, 105, 145), area);
-                set(buf, px, bot + spread, '\\', Color::Rgb(85, 105, 145), area);
+            // ── Pectoral fin (bottom) ──
+            if r > 0.32 && r < 0.46 {
+                let fh = (1.0 - ((r - 0.39) / 0.07).powi(2)).max(0.0) * 1.5;
+                for h in 1..=(fh.ceil() as i32) {
+                    let ch = if h == fh.ceil() as i32 { '\\' } else { '|' };
+                    set(buf, px, bot + h, ch, Color::Rgb(135, 150, 175), area);
+                }
+            }
+
+            // ── Tail fin fork ──
+            if r > 0.88 {
+                let spread = ((r - 0.88) / 0.12 * 3.0) as i32;
+                set(buf, px, top - spread, '/', Color::Rgb(65, 85, 135), area);
+                set(buf, px, bot + spread, '\\', Color::Rgb(125, 142, 170), area);
             }
         }
 
