@@ -53,15 +53,17 @@ impl App {
         let sx = (area.width as i32 - shark_len) / 2;
         let mid_y = area.height as f64 / 2.0;
 
+        // Helper: compute centerline y at a given column ratio
+        let cy_at = |r: f64| -> f64 {
+            let amp = 0.3 + 1.7 * r;
+            mid_y + (r * 7.0 + t * 3.5).sin() * amp
+        };
+
+        // ── Pass 1: Body + fins ──
         for col in 0..shark_len {
-            let r = col as f64 / shark_len as f64; // 0=nose, 1=tail tip
+            let r = col as f64 / shark_len as f64;
+            let cy = cy_at(r);
 
-            // ── Center line: sine wave, whole body participates ──
-            let amp = 0.3 + 1.7 * r; // head moves a little, tail moves a lot
-            let wave = (r * 7.0 + t * 3.5).sin() * amp;
-            let cy = mid_y + wave;
-
-            // ── Body thickness: tapers at both ends ──
             let half = if r < 0.12 {
                 r / 0.12 * 2.0
             } else if r > 0.82 {
@@ -78,51 +80,49 @@ impl App {
             let top = (cy - half).round() as i32;
             let bot = (cy + half).round() as i32;
 
-            // ── Body fill + outline ──
             for py in top..=bot {
-                if py < 0 || py >= area.height as i32 {
-                    continue;
-                }
                 let at_edge = py == top || py == bot;
                 let (ch, fg) = if r < 0.02 {
                     ('<', Color::Rgb(130, 150, 185))
-                } else if is_eye(r, py as f64, cy) {
-                    ('O', Color::Rgb(230, 235, 245))
-                } else if is_gill(r, py as f64, cy) {
-                    (':', Color::Rgb(60, 80, 120))
                 } else if at_edge {
                     ('-', Color::Rgb(100, 125, 165))
                 } else {
                     (' ', Color::Rgb(8, 10, 18))
                 };
-
                 set(buf, px, py, ch, fg, area);
             }
 
-            // ── Dorsal fin ──
+            // Dorsal fin
             if r > 0.28 && r < 0.48 {
-                let peak = 0.38;
-                let fh = (1.0 - ((r - peak) / 0.10).powi(2)).max(0.0) * 2.5;
+                let fh = (1.0 - ((r - 0.38) / 0.10).powi(2)).max(0.0) * 2.5;
                 for h in 1..=(fh.ceil() as i32) {
-                    let py = top - h;
                     let ch = if h == 1 { '/' } else { '|' };
-                    set(buf, px, py, ch, Color::Rgb(90, 112, 150), area);
+                    set(buf, px, top - h, ch, Color::Rgb(90, 112, 150), area);
                 }
             }
 
-            // ── Tail fin fork ──
+            // Tail fork
             if r > 0.90 {
                 let spread = ((r - 0.90) / 0.10 * 2.5) as i32;
                 set(buf, px, top - spread, '/', Color::Rgb(85, 105, 145), area);
-                set(
-                    buf,
-                    px,
-                    bot + spread,
-                    '\\',
-                    Color::Rgb(85, 105, 145),
-                    area,
-                );
+                set(buf, px, bot + spread, '\\', Color::Rgb(85, 105, 145), area);
             }
+        }
+
+        // ── Pass 2: Eye — exactly one cell, follows centerline ──
+        let eye_r = 0.13;
+        let eye_cy = cy_at(eye_r);
+        let eye_x = sx + (shark_len as f64 * eye_r).round() as i32;
+        let eye_y = (eye_cy - 0.4).round() as i32;
+        set(buf, eye_x, eye_y, 'O', Color::Rgb(230, 235, 245), area);
+
+        // ── Pass 3: Gill slits — 3 dots, follow centerline ──
+        for i in 0..3 {
+            let gr = 0.22 + i as f64 * 0.025;
+            let gcy = cy_at(gr);
+            let gx = sx + (shark_len as f64 * gr).round() as i32;
+            let gy = gcy.round() as i32;
+            set(buf, gx, gy, ':', Color::Rgb(60, 80, 120), area);
         }
 
         // Header
@@ -140,14 +140,6 @@ impl App {
             }
         }
     }
-}
-
-fn is_eye(r: f64, py: f64, cy: f64) -> bool {
-    (0.10..0.16).contains(&r) && (py - (cy - 0.5)).abs() < 0.8
-}
-
-fn is_gill(r: f64, py: f64, cy: f64) -> bool {
-    (0.22..0.30).contains(&r) && (py - cy).abs() < 1.2 && ((r * 100.0) as i32 % 3 == 0)
 }
 
 fn set(
