@@ -6,17 +6,9 @@ use std::time::{Duration, Instant};
 
 const TICK: Duration = Duration::from_millis(16);
 
-// ─── Pixel-art style shark ──────────────────────────────────────────────────
-// Each character = 1 pixel. Colors encoded by character:
-//   # = body (dark blue-gray)
-//   = = body mid
-//   - = belly (light)
-//   @ = eye
-//   : = gill
-//   ^ = dorsal fin top
-//   > = tail tips
-//   . = outline/edge
-//   (space) = transparent
+// ─── Shark sprite frames ────────────────────────────────────────────────────
+// 8 frames for one tail-beat cycle. Only the tail region changes.
+// Head/body stays identical → smooth, no tearing.
 
 const SHARK_FRAMES: &[&[&str]] = &[
     // Frame 0: tail center
@@ -27,55 +19,114 @@ const SHARK_FRAMES: &[&[&str]] = &[
         "  .####=====######=====##>.      ",
         "  .##@#::---########---##=>>.    ",
         "  .####=====######=====##>.      ",
-        "   ....`######...........        ",
-        "        `####`                   ",
-        "         `..`                    ",
+        "   .....######...........        ",
+        "        .####.                   ",
+        "         .^^.                    ",
     ],
-    // Frame 1: tail up
+    // Frame 1: tail lifting
     &[
         "         .^^.                    ",
         "        .####.                   ",
-        "   ....`######`..........        ",
-        "  .####=====######=====##.>.     ",
-        "  .##@#::---########---###=>>.   ",
-        "  .####=====######=====##`       ",
-        "   ....`######`..........        ",
-        "        `####`                   ",
-        "         `..`                    ",
+        "   .....######..........>.       ",
+        "  .####=====######=====##=>>.    ",
+        "  .##@#::---########---###>.     ",
+        "  .####=====######=====##.       ",
+        "   .....######...........        ",
+        "        .####.                   ",
+        "         .^^.                    ",
     ],
-    // Frame 2: tail down
+    // Frame 2: tail up
     &[
         "         .^^.                    ",
         "        .####.                   ",
-        "   ....`######`..........        ",
-        "  .####=====######=====##`       ",
-        "  .##@#::---########---###=>>.   ",
-        "  .####=====######=====##.>.     ",
-        "   ....`######`..........        ",
-        "        `####`                   ",
-        "         `..`                    ",
+        "   .....######.........=>>.      ",
+        "  .####=====######=====#>#>.     ",
+        "  .##@#::---########---##.       ",
+        "  .####=====######=====##.       ",
+        "   .....######...........        ",
+        "        .####.                   ",
+        "         .^^.                    ",
+    ],
+    // Frame 3: tail returning from up
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   .....######..........>.       ",
+        "  .####=====######=====##=>>.    ",
+        "  .##@#::---########---###>.     ",
+        "  .####=====######=====##.       ",
+        "   .....######...........        ",
+        "        .####.                   ",
+        "         .^^.                    ",
+    ],
+    // Frame 4: tail center (same as 0)
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   .....######...........        ",
+        "  .####=====######=====##>.      ",
+        "  .##@#::---########---##=>>.    ",
+        "  .####=====######=====##>.      ",
+        "   .....######...........        ",
+        "        .####.                   ",
+        "         .^^.                    ",
+    ],
+    // Frame 5: tail dropping
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   .....######...........        ",
+        "  .####=====######=====##.       ",
+        "  .##@#::---########---###>.     ",
+        "  .####=====######=====##=>>.    ",
+        "   .....######..........>.       ",
+        "        .####.                   ",
+        "         .^^.                    ",
+    ],
+    // Frame 6: tail down
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   .....######...........        ",
+        "  .####=====######=====##.       ",
+        "  .##@#::---########---##.       ",
+        "  .####=====######=====#>#>.     ",
+        "   .....######.........=>>.      ",
+        "        .####.                   ",
+        "         .^^.                    ",
+    ],
+    // Frame 7: tail returning from down
+    &[
+        "         .^^.                    ",
+        "        .####.                   ",
+        "   .....######...........        ",
+        "  .####=====######=====##.       ",
+        "  .##@#::---########---###>.     ",
+        "  .####=====######=====##=>>.    ",
+        "   .....######..........>.       ",
+        "        .####.                   ",
+        "         .^^.                    ",
     ],
 ];
 
 const SHARK_W: usize = 34;
 const SHARK_H: usize = 9;
 
-fn shark_color(ch: char) -> Color {
+fn shark_base_color(ch: char) -> (f64, f64, f64) {
     match ch {
-        '#' => Color::Rgb(75, 95, 145),
-        '=' => Color::Rgb(95, 115, 160),
-        '-' => Color::Rgb(170, 180, 200),
-        '@' => Color::Rgb(240, 245, 255),
-        ':' => Color::Rgb(50, 65, 105),
-        '^' => Color::Rgb(60, 80, 130),
-        '>' => Color::Rgb(70, 88, 138),
-        '.' => Color::Rgb(40, 55, 95),
-        '`' => Color::Rgb(40, 55, 95),
-        _ => Color::Rgb(75, 95, 145),
+        '#' => (75.0, 95.0, 145.0),
+        '=' => (95.0, 115.0, 160.0),
+        '-' => (170.0, 180.0, 200.0),
+        '@' => (240.0, 245.0, 255.0),
+        ':' => (50.0, 65.0, 105.0),
+        '^' => (60.0, 80.0, 130.0),
+        '>' => (70.0, 88.0, 138.0),
+        '.' | '`' => (40.0, 55.0, 95.0),
+        _ => (75.0, 95.0, 145.0),
     }
 }
 
-// ─── Eel ────────────────────────────────────────────────────────────────────
+// ─── Eel sprite frames ──────────────────────────────────────────────────────
 
 const EEL_FRAMES: &[&[&str]] = &[
     &[
@@ -84,24 +135,24 @@ const EEL_FRAMES: &[&[&str]] = &[
         " ..................................  ",
     ],
     &[
-        "  ..................................  ",
-        " .##@##::==#==#==#==#==#==#==#==#=>. ",
-        " ...................................  ",
+        "  .................................  ",
+        " .##@##::==#==#==#==#==#==#==#==#>. ",
+        "  .................................  ",
     ],
 ];
 
 const EEL_W: usize = 38;
 const EEL_H: usize = 3;
 
-fn eel_color(ch: char) -> Color {
+fn eel_base_color(ch: char) -> (f64, f64, f64) {
     match ch {
-        '#' => Color::Rgb(40, 80, 48),
-        '=' => Color::Rgb(50, 95, 58),
-        '@' => Color::Rgb(180, 200, 160),
-        ':' => Color::Rgb(30, 55, 35),
-        '>' => Color::Rgb(45, 85, 52),
-        '.' => Color::Rgb(28, 50, 32),
-        _ => Color::Rgb(40, 80, 48),
+        '#' => (40.0, 80.0, 48.0),
+        '=' => (50.0, 95.0, 58.0),
+        '@' => (180.0, 200.0, 160.0),
+        ':' => (30.0, 55.0, 35.0),
+        '>' => (45.0, 85.0, 52.0),
+        '.' | '`' => (28.0, 50.0, 32.0),
+        _ => (40.0, 80.0, 48.0),
     }
 }
 
@@ -112,14 +163,16 @@ struct Creature {
     frames: &'static [&'static [&'static str]],
     width: usize,
     height: usize,
-    color_fn: fn(char) -> Color,
-    // Undulation params
+    base_color: fn(char) -> (f64, f64, f64),
+    // Gentle whole-body undulation (very small — just a hint)
     wave_k: f64,
     wave_speed: f64,
-    amp_head: f64,
-    amp_tail: f64,
-    // Frame animation speed (frames per second for sprite swap)
+    amp: f64, // max bend in cells (keep < 0.5 for smoothness)
+    // Sprite frame rate
     frame_fps: f64,
+    // Whole-body vertical float
+    float_amp: f64,
+    float_speed: f64,
 }
 
 const CREATURES: &[Creature] = &[
@@ -128,24 +181,26 @@ const CREATURES: &[Creature] = &[
         frames: SHARK_FRAMES,
         width: SHARK_W,
         height: SHARK_H,
-        color_fn: shark_color,
-        wave_k: 4.5,
-        wave_speed: 2.5,
-        amp_head: 0.1,
-        amp_tail: 1.2,
-        frame_fps: 4.0,
+        base_color: shark_base_color,
+        wave_k: 3.0,
+        wave_speed: 2.0,
+        amp: 0.35,
+        frame_fps: 8.0, // 8 frames at 8fps = 1 cycle/sec
+        float_amp: 0.8,
+        float_speed: 0.4,
     },
     Creature {
         name: "Eel",
         frames: EEL_FRAMES,
         width: EEL_W,
         height: EEL_H,
-        color_fn: eel_color,
-        wave_k: 7.0,
-        wave_speed: 3.5,
-        amp_head: 0.4,
-        amp_tail: 2.5,
+        base_color: eel_base_color,
+        wave_k: 6.0,
+        wave_speed: 3.0,
+        amp: 0.4,
         frame_fps: 3.0,
+        float_amp: 1.2,
+        float_speed: 0.5,
     },
 ];
 
@@ -158,22 +213,29 @@ fn draw_creature(
     t: f64,
     speed: f64,
 ) {
+    // Whole-body vertical float (smooth, whole sprite moves as one)
+    let float_y = (t * c.float_speed * speed * 2.0 * PI).sin() * c.float_amp;
+
     let sx = (area.width as i32 - c.width as i32) / 2;
-    let sy = (area.height as i32 - c.height as i32) / 2;
+    let base_sy = (area.height as i32 - c.height as i32) / 2;
+    let sy = base_sy + float_y.round() as i32;
+
     let omega = 2.0 * PI * c.wave_speed * speed;
 
-    // Select sprite frame based on time
+    // Sprite frame selection (synced to wave phase for natural feel)
     let frame_idx = ((t * c.frame_fps * speed) as usize) % c.frames.len();
     let sprite = c.frames[frame_idx];
+
+    // Color breathing: subtle brightness oscillation
+    let breath = 0.92 + 0.08 * (t * 1.5 * speed).sin();
 
     for (row, line) in sprite.iter().enumerate() {
         for (col, ch) in line.chars().enumerate() {
             if ch == ' ' { continue; }
 
-            // Wave bend: each column shifts vertically
+            // Very gentle per-column bend (subtle — most motion comes from frame swap)
             let r = col as f64 / c.width as f64;
-            let amp = c.amp_head + (c.amp_tail - c.amp_head) * r * r;
-            let bend = (r * c.wave_k - omega * t).sin() * amp;
+            let bend = (r * c.wave_k - omega * t).sin() * c.amp * r * r;
 
             let px = sx + col as i32;
             let py = sy + row as i32 + bend.round() as i32;
@@ -182,10 +244,17 @@ fn draw_creature(
                 continue;
             }
 
-            let fg = (c.color_fn)(ch);
+            // Color with breathing + slight shimmer per character
+            let shimmer = 0.97 + 0.03 * (t * 4.0 + col as f64 * 0.3).sin();
+            let (br, bg, bb) = (c.base_color)(ch);
+            let intensity = breath * shimmer;
+            let fr = (br * intensity).min(255.0) as u8;
+            let fg = (bg * intensity).min(255.0) as u8;
+            let fb = (bb * intensity).min(255.0) as u8;
+
             let cell = &mut buf[(px as u16, py as u16)];
             cell.set_char(ch);
-            cell.set_fg(fg);
+            cell.set_fg(Color::Rgb(fr, fg, fb));
             cell.set_style(Style::default());
         }
     }
