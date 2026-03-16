@@ -6,19 +6,12 @@ use std::time::{Duration, Instant};
 
 const TICK: Duration = Duration::from_millis(16);
 
-// ─── Koi SDF (no braille — render directly to character cells) ──────────────
+// ─── Koi SDF ────────────────────────────────────────────────────────────────
 
-// Spine: S-curve that incorporates the current turn rate for dynamic bending
 fn koi_spine(s: f64, t: f64, turn: f64) -> (f64, f64) {
-    // Swimming undulation: travels head→tail
-    let swim_wave = (s * 2.5 - t * 2.2).sin() * s * s * 0.3;
-    // Turn-induced body bend: whole body curves when turning
-    // The body arcs proportionally to the turn rate
-    let turn_bend = turn * s * s * 2.0;
-
-    let x = (1.0 - s) * 5.0;
-    let y = swim_wave + turn_bend;
-    (x, y)
+    let swim = (s * 2.5 - t * 2.2).sin() * s * s * 0.3;
+    let bend = turn * s * s * 2.0;
+    ((1.0 - s) * 5.0, swim + bend)
 }
 
 fn koi_width(s: f64) -> f64 {
@@ -29,12 +22,11 @@ fn koi_width(s: f64) -> f64 {
     else { 0.6 * (1.0 - s) / 0.25 }
 }
 
-fn koi_red(s: f64, norm_p: f64, id: f64) -> bool {
+fn koi_red(s: f64, np: f64, id: f64) -> bool {
     let off = (id * 1.3).sin() * 0.08;
-    let p1 = s > 0.03 && s < 0.18 && norm_p.abs() < 0.7;
-    let p2 = s > (0.30 + off) && s < (0.55 + off) && norm_p.abs() < 0.8;
-    let p3 = s > 0.65 && s < 0.78 && norm_p.abs() < 0.5;
-    p1 || p2 || p3
+    (s > 0.03 && s < 0.18 && np.abs() < 0.7)
+        || (s > (0.30 + off) && s < (0.55 + off) && np.abs() < 0.8)
+        || (s > 0.65 && s < 0.78 && np.abs() < 0.5)
 }
 
 fn tangent_at(s: f64, t: f64, turn: f64) -> (f64, f64, f64, f64) {
@@ -47,6 +39,8 @@ fn tangent_at(s: f64, t: f64, turn: f64) -> (f64, f64, f64, f64) {
     (-dy / l, dx / l, x1, y1)
 }
 
+// ─── Koi rendering (uses bg color for solid fill) ───────────────────────────
+
 fn draw_koi(
     buf: &mut ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
@@ -55,25 +49,47 @@ fn draw_koi(
 ) {
     let cos_h = koi.heading.cos();
     let sin_h = koi.heading.sin();
-    let scale_x = 2.5; // chars per unit (horizontal — chars are narrow)
-    let scale_y = 1.2; // chars per unit (vertical — chars are tall)
+    let sx = 2.5f64; // scale x (chars per unit)
+    let sy = 1.2f64; // scale y
 
-    let screen_cx = koi.x * area.width as f64;
-    let screen_cy = koi.y * area.height as f64;
+    let cx = koi.x * area.width as f64;
+    let cy = koi.y * area.height as f64;
 
     let transform = |lx: f64, ly: f64| -> (i32, i32) {
         let wx = lx * cos_h - ly * sin_h;
         let wy = lx * sin_h + ly * cos_h;
-        ((screen_cx + wx * scale_x) as i32, (screen_cy + wy * scale_y) as i32)
+        ((cx + wx * sx) as i32, (cy + wy * sy) as i32)
     };
 
-    // Body
+    // Shadow (slightly offset, darker)
+    for si in 0..40 {
+        let s = si as f64 / 40.0;
+        let hw = koi_width(s) * 0.9;
+        let (nx, ny, px, py) = tangent_at(s, t, koi.turn_rate);
+        let steps = (hw * sx.max(sy) * 2.0) as i32 + 1;
+        for pi in -steps..=steps {
+            let p = pi as f64 / (steps as f64 / hw);
+            if p.abs() > hw { continue; }
+            let lx = px + nx * p;
+            let ly = py + ny * p;
+            let (scx, scy) = transform(lx, ly);
+            let scx = scx + 1;
+            let scy = scy + 1;
+            if scx >= 0 && scy >= 1 && scx < area.width as i32 && scy < area.height as i32 {
+                let cell = &mut buf[(scx as u16, scy as u16)];
+                cell.set_char(' ');
+                cell.set_bg(Color::Rgb(5, 9, 16));
+            }
+        }
+    }
+
+    // Body (filled with bg color — solid colored cells)
     for si in 0..50 {
         let s = si as f64 / 50.0;
         let hw = koi_width(s);
         let (nx, ny, px, py) = tangent_at(s, t, koi.turn_rate);
 
-        let steps = (hw * scale_x.max(scale_y) * 2.5) as i32 + 1;
+        let steps = (hw * sx.max(sy) * 2.5) as i32 + 1;
         for pi in -steps..=steps {
             let p = pi as f64 / (steps as f64 / hw);
             if p.abs() > hw { continue; }
@@ -81,32 +97,34 @@ fn draw_koi(
 
             let lx = px + nx * p;
             let ly = py + ny * p;
-            let (sx, sy) = transform(lx, ly);
+            let (scx, scy) = transform(lx, ly);
 
-            if sx < 0 || sy < 1 || sx >= area.width as i32 || sy >= area.height as i32 { continue; }
+            if scx < 0 || scy < 1 || scx >= area.width as i32 || scy >= area.height as i32 { continue; }
 
-            let edge = 1.0 - norm_p.abs().powi(2);
+            let edge_dist = 1.0 - norm_p.abs();
+            let is_outline = edge_dist < 0.12;
             let is_red = koi_red(s, norm_p, koi.id);
 
-            let (ch, r, g, b) = if edge < 0.15 {
-                // Outline
-                ('.', 120.0 * edge * 3.0, 115.0 * edge * 3.0, 105.0 * edge * 3.0)
+            let (ch, fg, bg) = if is_outline {
+                // Dark outline ring
+                (' ', Color::Rgb(0, 0, 0), Color::Rgb(60, 55, 45))
             } else if is_red {
-                let ch = if edge > 0.7 { '#' } else { '=' };
-                (ch, 210.0 * edge, 55.0 * edge, 40.0 * edge)
+                // Red patch — use █ fg for solid red
+                ('█', Color::Rgb(210, 55, 35), Color::Rgb(210, 55, 35))
             } else {
-                let ch = if edge > 0.7 { '#' } else if edge > 0.4 { '=' } else { '-' };
-                (ch, 235.0 * edge, 230.0 * edge, 220.0 * edge)
+                // White body
+                ('█', Color::Rgb(235, 230, 218), Color::Rgb(235, 230, 218))
             };
 
-            let cell = &mut buf[(sx as u16, sy as u16)];
+            let cell = &mut buf[(scx as u16, scy as u16)];
             cell.set_char(ch);
-            cell.set_fg(Color::Rgb(r as u8, g as u8, b as u8));
+            cell.set_fg(fg);
+            cell.set_bg(bg);
             cell.set_style(Style::default());
         }
     }
 
-    // Pectoral fins
+    // Pectoral fins (semi-transparent — use lighter bg)
     let fin_flap = (t * 2.5).sin() * 0.2;
     for side in [-1.0f64, 1.0] {
         let (fnx, fny, fpx, fpy) = tangent_at(0.22, t, koi.turn_rate);
@@ -115,19 +133,21 @@ fn draw_koi(
         let tdy = fpy2 - fpy;
         let tl = (tdx * tdx + tdy * tdy).sqrt().max(0.001);
 
-        for fi in 0..8 {
-            let ft = fi as f64 / 8.0;
+        for fi in 0..10 {
+            let ft = fi as f64 / 10.0;
             let spread = side * (1.0 + ft * 0.8 + fin_flap);
             let along = -ft * 1.2;
             let fx = fpx + fnx * spread + tdx / tl * along;
             let fy = fpy + fny * spread + tdy / tl * along;
-            let (sx, sy) = transform(fx, fy);
-            if sx >= 0 && sy >= 1 && sx < area.width as i32 && sy < area.height as i32 {
-                let a = (1.0 - ft) * 0.5;
-                let cell = &mut buf[(sx as u16, sy as u16)];
-                cell.set_char(',');
-                cell.set_fg(Color::Rgb((180.0 * a) as u8, (175.0 * a) as u8, (165.0 * a) as u8));
-                cell.set_style(Style::default());
+            let (scx, scy) = transform(fx, fy);
+            if scx >= 0 && scy >= 1 && scx < area.width as i32 && scy < area.height as i32 {
+                let a = 1.0 - ft;
+                let cell = &mut buf[(scx as u16, scy as u16)];
+                // Only draw fin if cell is still water (don't overwrite body)
+                if cell.bg == Color::Rgb(5, 9, 16) || cell.symbol() == " " {
+                    cell.set_char('░');
+                    cell.set_fg(Color::Rgb((180.0 * a) as u8, (170.0 * a) as u8, (155.0 * a) as u8));
+                }
             }
         }
     }
@@ -135,20 +155,19 @@ fn draw_koi(
     // Tail fin
     let tail_sway = (t * 2.0).sin() * 0.3;
     for lobe in [-1.0f64, 1.0] {
-        for ti in 0..12 {
-            let ft = ti as f64 / 12.0;
+        for ti in 0..14 {
+            let ft = ti as f64 / 14.0;
             let s_pos = (0.88 + ft * 0.12).min(0.99);
             let (tnx, tny, tpx, tpy) = tangent_at(s_pos, t, koi.turn_rate);
-            let spread = lobe * (0.2 + ft * 1.4 + tail_sway * ft);
+            let spread = lobe * (0.2 + ft * 1.5 + tail_sway * ft);
             let tx = tpx + tnx * spread;
             let ty = tpy + tny * spread;
-            let (sx, sy) = transform(tx, ty);
-            if sx >= 0 && sy >= 1 && sx < area.width as i32 && sy < area.height as i32 {
-                let a = (1.0 - ft * 0.3) * 0.5;
-                let cell = &mut buf[(sx as u16, sy as u16)];
-                cell.set_char(if ft < 0.5 { '~' } else { '.' });
-                cell.set_fg(Color::Rgb((195.0 * a) as u8, (185.0 * a) as u8, (170.0 * a) as u8));
-                cell.set_style(Style::default());
+            let (scx, scy) = transform(tx, ty);
+            if scx >= 0 && scy >= 1 && scx < area.width as i32 && scy < area.height as i32 {
+                let a = 1.0 - ft * 0.4;
+                let cell = &mut buf[(scx as u16, scy as u16)];
+                cell.set_char('░');
+                cell.set_fg(Color::Rgb((190.0 * a) as u8, (180.0 * a) as u8, (165.0 * a) as u8));
             }
         }
     }
@@ -158,17 +177,18 @@ fn draw_koi(
         let (enx, eny, epx, epy) = tangent_at(0.06, t, koi.turn_rate);
         let ex = epx + enx * eye_side;
         let ey = epy + eny * eye_side;
-        let (sx, sy) = transform(ex, ey);
-        if sx >= 0 && sy >= 1 && sx < area.width as i32 && sy < area.height as i32 {
-            let cell = &mut buf[(sx as u16, sy as u16)];
-            cell.set_char('@');
-            cell.set_fg(Color::Rgb(15, 15, 20));
+        let (scx, scy) = transform(ex, ey);
+        if scx >= 0 && scy >= 1 && scx < area.width as i32 && scy < area.height as i32 {
+            let cell = &mut buf[(scx as u16, scy as u16)];
+            cell.set_char('●');
+            cell.set_fg(Color::Rgb(10, 10, 15));
+            cell.set_bg(Color::Rgb(235, 230, 218));
             cell.set_style(Style::default());
         }
     }
 }
 
-// ─── Koi state + movement ───────────────────────────────────────────────────
+// ─── Koi state ──────────────────────────────────────────────────────────────
 
 struct Koi {
     x: f64, y: f64, heading: f64,
@@ -186,16 +206,13 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64) {
         k.turn_timer = 1.5 + s2 * 4.0;
     }
 
-    // Wall: steer toward center
-    let margin = 0.25;
-    let in_margin = k.x < margin || k.x > 1.0 - margin || k.y < margin || k.y > 1.0 - margin;
-    if in_margin {
+    let margin = 0.22;
+    if k.x < margin || k.x > 1.0 - margin || k.y < margin || k.y > 1.0 - margin {
         let to_center = (0.5 - k.y).atan2(0.5 - k.x);
         let diff = (to_center - k.heading + PI).rem_euclid(2.0 * PI) - PI;
         k.turn_rate += diff * 0.5 * dt;
     }
 
-    // Smoothly approach target turn rate (don't snap)
     k.turn_rate = k.turn_rate.clamp(-0.8, 0.8);
     k.heading += k.turn_rate * dt;
 
@@ -233,21 +250,21 @@ fn main() -> Result<()> {
             let area = f.area();
             let buf = f.buffer_mut();
 
-            // Water background with ripples
+            // Water
             for y in 0..area.height {
                 for x in 0..area.width {
                     let xf = x as f64;
                     let yf = y as f64;
                     let r = ((xf * 0.1 + yf * 0.17 + elapsed * 0.35).sin()
                         * (xf * 0.06 - elapsed * 0.2).cos()) * 0.5 + 0.5;
-                    let bg_r = (8.0 + r * 4.0) as u8;
-                    let bg_g = (13.0 + r * 6.0) as u8;
-                    let bg_b = (22.0 + r * 8.0) as u8;
+                    let br = (10.0 + r * 5.0) as u8;
+                    let bg = (18.0 + r * 8.0) as u8;
+                    let bb = (32.0 + r * 12.0) as u8;
 
                     let cell = &mut buf[(x, y)];
                     cell.set_char(' ');
-                    cell.set_bg(Color::Rgb(bg_r, bg_g, bg_b));
-                    cell.set_fg(Color::Rgb(bg_r, bg_g, bg_b));
+                    cell.set_bg(Color::Rgb(br, bg, bb));
+                    cell.set_fg(Color::Rgb(br, bg, bb));
                 }
             }
 
@@ -261,8 +278,8 @@ fn main() -> Result<()> {
                     if i >= area.width as usize { break; }
                     let cell = &mut buf[(i as u16, 0)];
                     cell.set_char(ch);
-                    cell.set_fg(Color::Rgb(50, 45, 75));
-                    cell.set_bg(Color::Rgb(8, 12, 20));
+                    cell.set_fg(Color::Rgb(60, 55, 85));
+                    cell.set_bg(Color::Rgb(10, 16, 28));
                 }
             }
         })?;
