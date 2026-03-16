@@ -62,7 +62,7 @@ impl Canvas {
 // ─── Koi spine chain ────────────────────────────────────────────────────────
 
 const N_SPINE: usize = 40;
-const SEG_LEN: f64 = 0.38;
+const SEG_LEN: f64 = 0.55;
 const FREQ: f64 = 1.2;
 const BODY_TOTAL: f64 = N_SPINE as f64 * SEG_LEN;
 
