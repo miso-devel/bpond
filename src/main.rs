@@ -213,56 +213,58 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
     }
 
     // Tail fin
-    let tail_pitch = (2.0 * PI * freq * t).cos() * 0.6;
+    let tail_pitch = (2.0 * PI * freq * t).cos() * 1.5;
     for lobe in [-1.0f64, 1.0] {
-        for ti in 0..16 {
-            let ft = ti as f64 / 16.0;
-            let idx = (N_SPINE - 6 + (ft * 5.0) as usize).min(N_SPINE - 1);
+        for ti in 0..20 {
+            let ft = ti as f64 / 20.0;
+            let idx = (N_SPINE - 7 + (ft * 6.0) as usize).min(N_SPINE - 1);
             let (nx, ny) = normal_at(idx);
-            let spread = lobe * (0.3 + ft * 2.5 + tail_pitch * ft);
+            let spread = lobe * (0.5 + ft * 5.0 + tail_pitch * ft);
             let (px, py) = to_px(koi.spine_x[idx] + nx * spread, koi.spine_y[idx] + ny * spread);
             let a = (1.0 - ft * 0.3) * 0.55;
             canvas.thick(px, py, (225.0 * a) as u8, (215.0 * a) as u8, (195.0 * a) as u8);
         }
     }
 
-    // Pectoral fins (at ~20%) — fan open/close like the original SDF version
+    // Pectoral fins (at ~20%) — fan open/close
+    // Spread and phase must be large enough in cell-space to be visible
+    // Body half-width is ~2.7 cells, fins should extend well beyond that
     let pec_idx = (N_SPINE as f64 * 0.2) as usize;
-    let fin_phase = (t * 2.5).sin() * 0.8; // open/close oscillation
+    let fin_phase = (t * 2.5).sin() * 2.5; // ±2.5 cells of oscillation
     if pec_idx < N_SPINE {
         let (nx, ny) = normal_at(pec_idx);
         let (tx, ty) = tangent_at(pec_idx);
         for side in [-1.0f64, 1.0] {
-            for fi in 0..20 {
-                let ft = fi as f64 / 20.0;
-                // Fan spread: widens from root to tip + opens/closes with time
-                let spread = side * (2.2 + ft * 1.8 + fin_phase);
-                // Trail backward along body axis (tip flows behind)
-                let along = -ft * 3.5;
+            for fi in 0..24 {
+                let ft = fi as f64 / 24.0;
+                // Fan: base extends ~5 cells from body, tip ~9 cells, phase swings ±2.5
+                let spread = side * (5.0 + ft * 4.0 + fin_phase * (0.5 + ft));
+                // Tip trails behind along body
+                let along = -ft * 6.0;
                 let wx = koi.spine_x[pec_idx] + nx * spread + tx * along;
                 let wy = koi.spine_y[pec_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
-                let a = (1.0 - ft * 0.7) * 0.5;
+                let a = (1.0 - ft * 0.6) * 0.5;
                 canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
             }
         }
     }
 
-    // Pelvic fins (at ~45%) — same fan motion, smaller
-    let pel_phase = (t * 2.5 + 1.0).sin() * 0.5;
+    // Pelvic fins (at ~45%) — same fan, smaller
+    let pel_phase = (t * 2.5 + 1.0).sin() * 1.5;
     let pel_idx = (N_SPINE as f64 * 0.45) as usize;
     if pel_idx < N_SPINE {
         let (nx, ny) = normal_at(pel_idx);
         let (tx, ty) = tangent_at(pel_idx);
         for side in [-1.0f64, 1.0] {
-            for fi in 0..14 {
-                let ft = fi as f64 / 14.0;
-                let spread = side * (1.5 + ft * 1.2 + pel_phase);
-                let along = -ft * 2.0;
+            for fi in 0..16 {
+                let ft = fi as f64 / 16.0;
+                let spread = side * (3.5 + ft * 3.0 + pel_phase * (0.5 + ft));
+                let along = -ft * 4.0;
                 let wx = koi.spine_x[pel_idx] + nx * spread + tx * along;
                 let wy = koi.spine_y[pel_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
-                let a = (1.0 - ft * 0.7) * 0.45;
+                let a = (1.0 - ft * 0.6) * 0.45;
                 canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
             }
         }
