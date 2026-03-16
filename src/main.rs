@@ -166,7 +166,7 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, sx: f64, sy: f64, koi
             let p = pi as f64 / (steps as f64 / hw);
             if p.abs() > hw { continue; }
             let (dx, dy) = xform(px + nx * p, py + ny * p);
-            canvas.dot(dx + 3, dy + 4, 5, 9, 16);
+            canvas.dot(dx + 3, dy + 5, 3, 6, 12);
         }
     }
 
@@ -180,12 +180,12 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, sx: f64, sy: f64, koi
             let spread = lobe * (0.08 + ft * 1.0 + tail_pitch * ft);
             let (dx, dy) = xform(tpx + tnx * spread, tpy + tny * spread);
             let a = (1.0 - ft * 0.3) * 0.55;
-            canvas.thick(dx, dy, (200.0 * a) as u8, (190.0 * a) as u8, (175.0 * a) as u8);
+            canvas.thick(dx, dy, (225.0 * a) as u8, (215.0 * a) as u8, (195.0 * a) as u8);
         }
     }
 
     // Pectoral fins (s=0.22)
-    let fin_c = (185, 178, 165);
+    let fin_c = (210, 200, 180);
     for (side, is_left) in [(-1.0f64, true), (1.0, false)] {
         let ph = if is_left { 0.0 } else { PI };
         draw_fin(canvas, 0.22, t, koi.turn_rate, freq, koi.heading, cx, cy, sx, sy,
@@ -210,11 +210,11 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, sx: f64, sy: f64, koi
             if p.abs() > hw { continue; }
             let np = (p / hw).abs();
             let (dx, dy) = xform(px + nx * p, py + ny * p);
-            let outline = np > 0.82;
+            let outline = np > 0.80;
             let red = is_red(s, p / hw, koi.id);
-            let (r, g, b) = if outline { (48, 44, 36) }
-                else if red { (218, 56, 36) }
-                else { (240, 236, 225) };
+            let (r, g, b) = if outline { (30, 25, 18) }
+                else if red { (235, 45, 25) }
+                else { (255, 252, 242) };
             canvas.fat(dx, dy, r, g, b);
         }
     }
@@ -252,17 +252,16 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     k.turn_rate = k.turn_rate.clamp(-0.45, 0.45);
     k.heading += k.turn_rate * dt;
 
-    // Gentle heading bias toward center (quadratic, very subtle)
-    let cx = w / 2.0;
-    let cy = h / 2.0;
-    let dx = (k.x - cx) / w;
-    let dy = (k.y - cy) / h;
-    let dist = (dx * dx + dy * dy).sqrt();
-    if dist > 0.25 {
-        let strength = (dist - 0.25).powi(2) * 0.12;
+    // Only steer back when FULLY off-screen (no bias while visible)
+    let margin = 5.0; // cells past the edge before steering kicks in
+    let fully_out = k.x < -margin || k.x > w + margin
+        || k.y < -margin || k.y > h + margin;
+    if fully_out {
+        let cx = w / 2.0;
+        let cy = h / 2.0;
         let toward = (cy - k.y).atan2(cx - k.x);
         let diff = (toward - k.heading + PI).rem_euclid(2.0 * PI) - PI;
-        k.heading += diff * strength * dt;
+        k.heading += diff * 0.3 * dt;
     }
 
     let burst = if (t * 0.1 + k.id).sin() > 0.97 { 1.5 } else { 1.0 };
