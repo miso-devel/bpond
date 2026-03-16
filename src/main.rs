@@ -248,28 +248,8 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
         k.turn_timer = 2.0 + s2 * 5.0; // 2-7 seconds per decision
     }
 
-    // Steer back when outside the screen (allow going out, but always return)
-    let cx = w / 2.0;
-    let cy = h / 2.0;
-    let outside_x = k.x < -2.0 || k.x > w + 2.0;
-    let outside_y = k.y < -2.0 || k.y > h + 2.0;
-    let far_x = k.x < w * 0.05 || k.x > w * 0.95;
-    let far_y = k.y < h * 0.05 || k.y > h * 0.95;
-
-    if outside_x || outside_y {
-        // Far outside — strong pull back
-        let to_center = (cy - k.y).atan2(cx - k.x);
-        let diff = (to_center - k.heading + PI).rem_euclid(2.0 * PI) - PI;
-        k.target_turn = diff * 0.6;
-    } else if far_x || far_y {
-        // Near edge — gentle nudge
-        let to_center = (cy - k.y).atan2(cx - k.x);
-        let diff = (to_center - k.heading + PI).rem_euclid(2.0 * PI) - PI;
-        k.target_turn += diff * 0.15 * dt;
-    }
-
-    // Smoothly approach target (very gradual)
-    let approach = 0.8 * dt;
+    // Smoothly approach target turn (from random decisions above)
+    let approach = 0.6 * dt;
     if (k.target_turn - k.turn_rate).abs() < approach {
         k.turn_rate = k.target_turn;
     } else if k.target_turn > k.turn_rate {
@@ -277,9 +257,24 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     } else {
         k.turn_rate -= approach;
     }
-    k.turn_rate = k.turn_rate.clamp(-0.5, 0.5);
+    k.turn_rate = k.turn_rate.clamp(-0.45, 0.45);
 
     k.heading += k.turn_rate * dt;
+
+    // Gentle heading bias toward screen center — NOT overriding turn_rate,
+    // just nudging heading directly so the fish "wants" to stay in view.
+    // Strength increases with distance from center (quadratic).
+    let cx = w / 2.0;
+    let cy = h / 2.0;
+    let dx = k.x - cx;
+    let dy = k.y - cy;
+    let dist = ((dx / w).powi(2) + (dy / h).powi(2)).sqrt(); // 0 at center, ~0.7 at corner
+    if dist > 0.3 {
+        let strength = (dist - 0.3).powi(2) * 0.15;
+        let toward = (cy - k.y).atan2(cx - k.x);
+        let diff = (toward - k.heading + PI).rem_euclid(2.0 * PI) - PI;
+        k.heading += diff * strength * dt;
+    }
 
     // Constant speed, with very rare brief burst
     let burst = if (t * 0.1 + k.id).sin() > 0.97 { 1.6 } else { 1.0 };
@@ -342,7 +337,8 @@ fn main() -> Result<()> {
             let ch = (area.height as usize).saturating_sub(1);
             if cw < 4 || ch < 4 { return; }
             let mut canvas = Canvas::new(cw, ch);
-            let koi_scale = (ch as f64 * 4.0 / 6.0).min(cw as f64 * 2.0 / 6.0);
+            // Scale koi relative to terminal size — resizes in real-time
+            let koi_scale = (ch as f64 * 4.0 / 8.0).min(cw as f64 * 2.0 / 8.0);
 
             for k in &fish {
                 let kcx = k.x / area.width as f64 * canvas.w as f64;
