@@ -69,11 +69,11 @@ const BODY_TOTAL: f64 = N_SPINE as f64 * SEG_LEN;
 
 // Body half-width as fraction of BODY_TOTAL, then scaled to world units
 fn body_width(s: f64) -> f64 {
-    let frac = if s < 0.05 { s / 0.05 * 0.08 }
-        else if s < 0.2 { 0.08 + (s - 0.05) / 0.15 * 0.04 }
-        else if s < 0.4 { 0.12 }
-        else if s < 0.75 { 0.12 - (s - 0.4) / 0.35 * 0.05 }
-        else { 0.07 * (1.0 - s) / 0.25 };
+    let frac = if s < 0.05 { s / 0.05 * 0.10 }
+        else if s < 0.15 { 0.10 + (s - 0.05) / 0.10 * 0.08 }
+        else if s < 0.40 { 0.18 }
+        else if s < 0.75 { 0.18 - (s - 0.4) / 0.35 * 0.08 }
+        else { 0.10 * (1.0 - s) / 0.25 };
     frac * BODY_TOTAL
 }
 
@@ -226,19 +226,23 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         }
     }
 
-    // Pectoral fins (at ~20% from head)
+    // Pectoral fins (at ~20% from head) — sweep left/right alternately
     let pec_idx = (N_SPINE as f64 * 0.2) as usize;
     if pec_idx < N_SPINE {
         let (nx, ny) = normal_at(pec_idx);
         let (tx, ty) = tangent_at(pec_idx);
         for (side, phase) in [(-1.0f64, 0.0), (1.0, PI)] {
-            let flap = (2.0 * PI * freq * t + phase).sin() * 0.8 + 1.8;
-            for fi in 0..14 {
-                let ft = fi as f64 / 14.0;
-                let spread = side * flap * (1.0 - ft * 0.4);
-                let along = -ft * 2.5;
-                let wx = koi.spine_x[pec_idx] + nx * spread + tx * along;
-                let wy = koi.spine_y[pec_idx] + ny * spread + ty * along;
+            // Sweep angle: fin swings forward and backward along body axis
+            let sweep = (2.0 * PI * freq * t + phase).sin();
+            let spread_base = side * 2.0; // how far from body
+            for fi in 0..16 {
+                let ft = fi as f64 / 16.0;
+                // Fan out from body: perpendicular spread decreases along fin
+                let perp = spread_base * (1.0 - ft * 0.3);
+                // Sweep along body axis: the fin tip swings forward/back
+                let along = -ft * 2.0 + sweep * ft * 1.5;
+                let wx = koi.spine_x[pec_idx] + nx * perp + tx * along;
+                let wy = koi.spine_y[pec_idx] + ny * perp + ty * along;
                 let (px, py) = to_px(wx, wy);
                 let a = (1.0 - ft) * 0.5;
                 canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
@@ -246,19 +250,20 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         }
     }
 
-    // Pelvic fins (at ~45%)
+    // Pelvic fins (at ~45%) — same sweep motion, smaller
     let pel_idx = (N_SPINE as f64 * 0.45) as usize;
     if pel_idx < N_SPINE {
         let (nx, ny) = normal_at(pel_idx);
         let (tx, ty) = tangent_at(pel_idx);
         for (side, phase) in [(-1.0f64, 0.5), (1.0, PI + 0.5)] {
-            let flap = (2.0 * PI * freq * t + phase).sin() * 0.5 + 1.2;
-            for fi in 0..10 {
-                let ft = fi as f64 / 10.0;
-                let spread = side * flap * (1.0 - ft * 0.5);
-                let along = -ft * 1.5;
-                let wx = koi.spine_x[pel_idx] + nx * spread + tx * along;
-                let wy = koi.spine_y[pel_idx] + ny * spread + ty * along;
+            let sweep = (2.0 * PI * freq * t + phase).sin();
+            let spread_base = side * 1.4;
+            for fi in 0..12 {
+                let ft = fi as f64 / 12.0;
+                let perp = spread_base * (1.0 - ft * 0.3);
+                let along = -ft * 1.2 + sweep * ft * 1.0;
+                let wx = koi.spine_x[pel_idx] + nx * perp + tx * along;
+                let wy = koi.spine_y[pel_idx] + ny * perp + ty * along;
                 let (px, py) = to_px(wx, wy);
                 let a = (1.0 - ft) * 0.45;
                 canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
