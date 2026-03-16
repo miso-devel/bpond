@@ -95,11 +95,37 @@ fn body_width(s: f64) -> f64 {
     else { 0.55 * (1.0 - s) / 0.25 }
 }
 
-fn is_red(s: f64, np: f64, id: f64) -> bool {
-    let off = (id * 1.3).sin() * 0.06;
-    (s > 0.04 && s < 0.14 && np.abs() < 0.55)
-        || (s > (0.28 + off) && s < (0.48 + off) && np.abs() < 0.7)
-        || (s > 0.60 && s < 0.72 && np.abs() < 0.4)
+// Each koi has a unique pattern based on its id
+// Returns: 0 = base color, 1 = accent color, 2 = second accent (for sanke/showa)
+fn pattern(s: f64, np: f64, id: f64) -> u8 {
+    let seed = (id * 2.71).sin().abs();
+    let off1 = (id * 1.3).sin() * 0.08;
+    let off2 = (id * 3.7).cos() * 0.06;
+
+    let variant = (id * 1.9).sin().abs(); // 0..1 determines pattern style
+
+    if variant < 0.25 {
+        // Kohaku: 2 large patches + head cap
+        let p1 = s > 0.03 && s < (0.16 + off1) && np.abs() < 0.5;
+        let p2 = s > (0.32 + off1) && s < (0.58 + off2) && np.abs() < 0.75;
+        if p1 || p2 { 1 } else { 0 }
+    } else if variant < 0.5 {
+        // Tancho: single round spot on head only
+        let spot = (s - 0.08).powi(2) + (np * 0.5).powi(2) < 0.008 + seed * 0.003;
+        if spot { 1 } else { 0 }
+    } else if variant < 0.75 {
+        // Sanke: red patches + small black (sumi) dots
+        let p1 = s > (0.05 + off1) && s < (0.22 + off1) && np.abs() < 0.6;
+        let p2 = s > (0.40 + off2) && s < (0.62 + off2) && np.abs() < 0.65;
+        let sumi = ((s * 17.0 + seed * 10.0).sin() > 0.85) && (np.abs() > 0.3);
+        if sumi { 2 } else if p1 || p2 { 1 } else { 0 }
+    } else {
+        // Showa: mostly dark with red and white patches
+        let white = (s > (0.15 + off1) && s < (0.30 + off1) && np.abs() < 0.55)
+            || (s > (0.55 + off2) && s < (0.72 + off2) && np.abs() < 0.5);
+        let red = s > (0.35 + off1) && s < (0.52 + off2) && np.abs() < 0.7;
+        if red { 1 } else if white { 0 } else { 2 }
+    }
 }
 
 fn spine_at(s: f64, t: f64, turn: f64, freq: f64) -> (f64, f64) {
@@ -211,10 +237,11 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, sx: f64, sy: f64, koi
             let np = (p / hw).abs();
             let (dx, dy) = xform(px + nx * p, py + ny * p);
             let outline = np > 0.80;
-            let red = is_red(s, p / hw, koi.id);
+            let pat = pattern(s, p / hw, koi.id);
             let (r, g, b) = if outline { (30, 25, 18) }
-                else if red { (235, 45, 25) }
-                else { (255, 252, 242) };
+                else if pat == 1 { koi.accent1 }
+                else if pat == 2 { koi.accent2 }
+                else { koi.base_color };
             canvas.fat(dx, dy, r, g, b);
         }
     }
@@ -226,6 +253,9 @@ struct Koi {
     x: f64, y: f64, heading: f64,
     speed: f64, turn_rate: f64, target_turn: f64,
     turn_timer: f64, id: f64,
+    base_color: (u8, u8, u8),   // body white/gold
+    accent1: (u8, u8, u8),      // red/orange patches
+    accent2: (u8, u8, u8),      // black/dark sumi marks
 }
 
 fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
@@ -277,14 +307,22 @@ fn main() -> Result<()> {
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut fish = vec![
+        // Kohaku (red on white)
         Koi { x: tw as f64 * 0.3, y: th as f64 * 0.35, heading: 0.3,
-              speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0 },
+              speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0,
+              base_color: (255, 252, 242), accent1: (235, 45, 25), accent2: (30, 25, 18) },
+        // Ogon (gold body, orange accent)
         Koi { x: tw as f64 * 0.7, y: th as f64 * 0.6, heading: 3.5,
-              speed: 3.0, turn_rate: 0.0, target_turn: 0.0, turn_timer: 2.0, id: 4.3 },
+              speed: 3.0, turn_rate: 0.0, target_turn: 0.0, turn_timer: 2.0, id: 4.3,
+              base_color: (245, 210, 80), accent1: (230, 130, 30), accent2: (100, 70, 20) },
+        // Sanke (white, red, black spots)
         Koi { x: tw as f64 * 0.5, y: th as f64 * 0.25, heading: 1.8,
-              speed: 2.8, turn_rate: 0.0, target_turn: 0.0, turn_timer: 4.0, id: 7.1 },
+              speed: 2.8, turn_rate: 0.0, target_turn: 0.0, turn_timer: 4.0, id: 7.1,
+              base_color: (255, 250, 240), accent1: (220, 50, 35), accent2: (25, 22, 20) },
+        // Showa (black base, red/white patches)
         Koi { x: tw as f64 * 0.4, y: th as f64 * 0.7, heading: 5.2,
-              speed: 3.2, turn_rate: 0.0, target_turn: 0.0, turn_timer: 1.5, id: 9.8 },
+              speed: 3.2, turn_rate: 0.0, target_turn: 0.0, turn_timer: 1.5, id: 9.8,
+              base_color: (250, 248, 238), accent1: (225, 40, 30), accent2: (20, 18, 15) },
     ];
 
     let mut elapsed = 0.0f64;
