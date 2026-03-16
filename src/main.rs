@@ -248,25 +248,27 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
         k.turn_timer = 2.0 + s2 * 5.0; // 2-7 seconds per decision
     }
 
-    // Wall avoidance: steer toward center when approaching edge
-    let margin_x = w * 0.12;
-    let margin_y = h * 0.12;
+    // Steer back when outside the screen (allow going out, but always return)
     let cx = w / 2.0;
     let cy = h / 2.0;
-    let safe_rx = w / 2.0 - margin_x;
-    let safe_ry = h / 2.0 - margin_y;
-    let dx = k.x - cx;
-    let dy = k.y - cy;
-    let ellipse_d = (dx / safe_rx).powi(2) + (dy / safe_ry).powi(2);
+    let outside_x = k.x < -2.0 || k.x > w + 2.0;
+    let outside_y = k.y < -2.0 || k.y > h + 2.0;
+    let far_x = k.x < w * 0.05 || k.x > w * 0.95;
+    let far_y = k.y < h * 0.05 || k.y > h * 0.95;
 
-    if ellipse_d > 0.6 {
-        let push = ((ellipse_d - 0.6) / 0.4).clamp(0.0, 1.0);
+    if outside_x || outside_y {
+        // Far outside — strong pull back
         let to_center = (cy - k.y).atan2(cx - k.x);
         let diff = (to_center - k.heading + PI).rem_euclid(2.0 * PI) - PI;
-        k.target_turn = diff * push * 0.4; // gentle, proportional
+        k.target_turn = diff * 0.6;
+    } else if far_x || far_y {
+        // Near edge — gentle nudge
+        let to_center = (cy - k.y).atan2(cx - k.x);
+        let diff = (to_center - k.heading + PI).rem_euclid(2.0 * PI) - PI;
+        k.target_turn += diff * 0.15 * dt;
     }
 
-    // Smoothly approach target (very gradual — no snapping)
+    // Smoothly approach target (very gradual)
     let approach = 0.8 * dt;
     if (k.target_turn - k.turn_rate).abs() < approach {
         k.turn_rate = k.target_turn;
@@ -283,9 +285,7 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     let burst = if (t * 0.1 + k.id).sin() > 0.97 { 1.6 } else { 1.0 };
     k.x += k.heading.cos() * k.speed * burst * dt;
     k.y += k.heading.sin() * k.speed * burst * dt;
-
-    k.x = k.x.clamp(margin_x * 0.3, w - margin_x * 0.3);
-    k.y = k.y.clamp(margin_y * 0.3, h - margin_y * 0.3);
+    // No clamp — fish can go off-screen and come back
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -295,10 +295,16 @@ fn main() -> Result<()> {
     let mut terminal = ratatui::init();
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
-    let mut koi = Koi {
-        x: tw as f64 / 2.0, y: th as f64 / 2.0, heading: 0.3,
-        speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0,
-    };
+    let mut fish = vec![
+        Koi {
+            x: tw as f64 * 0.35, y: th as f64 * 0.45, heading: 0.3,
+            speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0,
+        },
+        Koi {
+            x: tw as f64 * 0.65, y: th as f64 * 0.55, heading: 3.5,
+            speed: 3.0, turn_rate: 0.0, target_turn: 0.0, turn_timer: 2.0, id: 4.3,
+        },
+    ];
 
     let mut elapsed = 0.0f64;
     let mut speed = 1.0f64;
@@ -310,7 +316,7 @@ fn main() -> Result<()> {
         last = Instant::now();
 
         let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
-        update_koi(&mut koi, dt, elapsed, tw as f64, th as f64);
+        for k in &mut fish { update_koi(k, dt, elapsed, tw as f64, th as f64); }
 
         terminal.draw(|f| {
             let area = f.area();
@@ -338,9 +344,11 @@ fn main() -> Result<()> {
             let mut canvas = Canvas::new(cw, ch);
             let koi_scale = (ch as f64 * 4.0 / 6.0).min(cw as f64 * 2.0 / 6.0);
 
-            let kcx = koi.x / area.width as f64 * canvas.w as f64;
-            let kcy = koi.y / area.height as f64 * canvas.h as f64;
-            draw_koi(&mut canvas, elapsed, kcx, kcy, koi_scale, &koi);
+            for k in &fish {
+                let kcx = k.x / area.width as f64 * canvas.w as f64;
+                let kcy = k.y / area.height as f64 * canvas.h as f64;
+                draw_koi(&mut canvas, elapsed, kcx, kcy, koi_scale, k);
+            }
             canvas.render(buf, 0, 1, area);
 
             if area.width > 20 {
