@@ -66,7 +66,7 @@ impl Canvas {
 // the heading changes — no rigid rotation.
 
 const N_SPINE: usize = 40;
-const SEG_LEN: f64 = 0.13; // distance between spine points (in world units)
+const SEG_LEN: f64 = 0.38; // distance between spine points (in world units)
 const FREQ: f64 = 1.2;
 
 struct Koi {
@@ -179,11 +179,12 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
 // ─── Body width ─────────────────────────────────────────────────────────────
 
 fn body_width(s: f64) -> f64 {
-    if s < 0.05 { s / 0.05 * 0.5 }
-    else if s < 0.2 { 0.5 + (s - 0.05) / 0.15 * 0.5 }
-    else if s < 0.4 { 1.0 }
-    else if s < 0.75 { 1.0 - (s - 0.4) / 0.35 * 0.45 }
-    else { 0.55 * (1.0 - s) / 0.25 }
+    let w = if s < 0.05 { s / 0.05 * 0.5 }
+        else if s < 0.2 { 0.5 + (s - 0.05) / 0.15 * 0.5 }
+        else if s < 0.4 { 1.0 }
+        else if s < 0.75 { 1.0 - (s - 0.4) / 0.35 * 0.45 }
+        else { 0.55 * (1.0 - s) / 0.25 };
+    w * 2.8 // scale up body width to match larger spine
 }
 
 // ─── Drawing ────────────────────────────────────────────────────────────────
@@ -236,7 +237,7 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
                 let idx = N_SPINE - 5 + (ft * 4.0) as usize;
                 let idx = idx.min(N_SPINE - 1);
                 let (nx, ny) = normal_at(idx);
-                let spread = lobe * (0.05 + ft * 0.5 + tail_pitch * ft);
+                let spread = lobe * (0.15 + ft * 1.5 + tail_pitch * ft);
                 let wx = koi.spine_x[idx] + nx * spread;
                 let wy = koi.spine_y[idx] + ny * spread;
                 let (px, py) = to_px(wx, wy);
@@ -253,11 +254,11 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         let (nx, ny) = normal_at(pec_idx);
         let (tx, ty) = tangent_at(pec_idx);
         for (side_sign, phase_off) in [(-1.0f64, 0.0), (1.0, PI)] {
-            let flap = (2.0 * PI * freq * t + phase_off).sin() * 0.12 + 0.3;
-            for fi in 0..8 {
-                let ft = fi as f64 / 8.0;
+            let flap = (2.0 * PI * freq * t + phase_off).sin() * 0.35 + 0.9;
+            for fi in 0..10 {
+                let ft = fi as f64 / 10.0;
                 let spread = side_sign * flap * (1.0 - ft * 0.4);
-                let along = -ft * 0.4;
+                let along = -ft * 1.2;
                 let wx = koi.spine_x[pec_idx] + nx * spread + tx * along;
                 let wy = koi.spine_y[pec_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
@@ -273,11 +274,11 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         let (nx, ny) = normal_at(pel_idx);
         let (tx, ty) = tangent_at(pel_idx);
         for (side_sign, phase_off) in [(-1.0f64, 0.5), (1.0, PI + 0.5)] {
-            let flap = (2.0 * PI * freq * t + phase_off).sin() * 0.08 + 0.2;
-            for fi in 0..6 {
-                let ft = fi as f64 / 6.0;
+            let flap = (2.0 * PI * freq * t + phase_off).sin() * 0.25 + 0.6;
+            for fi in 0..8 {
+                let ft = fi as f64 / 8.0;
                 let spread = side_sign * flap * (1.0 - ft * 0.5);
-                let along = -ft * 0.25;
+                let along = -ft * 0.8;
                 let wx = koi.spine_x[pel_idx] + nx * spread + tx * along;
                 let wy = koi.spine_y[pel_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
