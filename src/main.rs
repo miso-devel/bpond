@@ -226,46 +226,43 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         }
     }
 
-    // Pectoral fins (at ~20% from head) — sweep left/right alternately
+    // Pectoral fins (at ~20%) — fan open/close like the original SDF version
     let pec_idx = (N_SPINE as f64 * 0.2) as usize;
+    let fin_phase = (t * 2.5).sin() * 0.8; // open/close oscillation
     if pec_idx < N_SPINE {
         let (nx, ny) = normal_at(pec_idx);
         let (tx, ty) = tangent_at(pec_idx);
-        for (side, phase) in [(-1.0f64, 0.0), (1.0, PI)] {
-            // Sweep angle: fin swings forward and backward along body axis
-            let sweep = (2.0 * PI * freq * t + phase).sin();
-            let spread_base = side * 2.0; // how far from body
-            for fi in 0..16 {
-                let ft = fi as f64 / 16.0;
-                // Fan out from body: perpendicular spread decreases along fin
-                let perp = spread_base * (1.0 - ft * 0.3);
-                // Sweep along body axis: the fin tip swings forward/back
-                let along = -ft * 2.0 + sweep * ft * 1.5;
-                let wx = koi.spine_x[pec_idx] + nx * perp + tx * along;
-                let wy = koi.spine_y[pec_idx] + ny * perp + ty * along;
+        for side in [-1.0f64, 1.0] {
+            for fi in 0..20 {
+                let ft = fi as f64 / 20.0;
+                // Fan spread: widens from root to tip + opens/closes with time
+                let spread = side * (2.2 + ft * 1.8 + fin_phase);
+                // Trail backward along body axis (tip flows behind)
+                let along = -ft * 3.5;
+                let wx = koi.spine_x[pec_idx] + nx * spread + tx * along;
+                let wy = koi.spine_y[pec_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
-                let a = (1.0 - ft) * 0.5;
+                let a = (1.0 - ft * 0.7) * 0.5;
                 canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
             }
         }
     }
 
-    // Pelvic fins (at ~45%) — same sweep motion, smaller
+    // Pelvic fins (at ~45%) — same fan motion, smaller
+    let pel_phase = (t * 2.5 + 1.0).sin() * 0.5;
     let pel_idx = (N_SPINE as f64 * 0.45) as usize;
     if pel_idx < N_SPINE {
         let (nx, ny) = normal_at(pel_idx);
         let (tx, ty) = tangent_at(pel_idx);
-        for (side, phase) in [(-1.0f64, 0.5), (1.0, PI + 0.5)] {
-            let sweep = (2.0 * PI * freq * t + phase).sin();
-            let spread_base = side * 1.4;
-            for fi in 0..12 {
-                let ft = fi as f64 / 12.0;
-                let perp = spread_base * (1.0 - ft * 0.3);
-                let along = -ft * 1.2 + sweep * ft * 1.0;
-                let wx = koi.spine_x[pel_idx] + nx * perp + tx * along;
-                let wy = koi.spine_y[pel_idx] + ny * perp + ty * along;
+        for side in [-1.0f64, 1.0] {
+            for fi in 0..14 {
+                let ft = fi as f64 / 14.0;
+                let spread = side * (1.5 + ft * 1.2 + pel_phase);
+                let along = -ft * 2.0;
+                let wx = koi.spine_x[pel_idx] + nx * spread + tx * along;
+                let wy = koi.spine_y[pel_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
-                let a = (1.0 - ft) * 0.45;
+                let a = (1.0 - ft * 0.7) * 0.45;
                 canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
             }
         }
