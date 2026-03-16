@@ -278,10 +278,14 @@ fn main() -> Result<()> {
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut fish = vec![
-        Koi { x: tw as f64 * 0.35, y: th as f64 * 0.45, heading: 0.3,
+        Koi { x: tw as f64 * 0.3, y: th as f64 * 0.35, heading: 0.3,
               speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0 },
-        Koi { x: tw as f64 * 0.65, y: th as f64 * 0.55, heading: 3.5,
+        Koi { x: tw as f64 * 0.7, y: th as f64 * 0.6, heading: 3.5,
               speed: 3.0, turn_rate: 0.0, target_turn: 0.0, turn_timer: 2.0, id: 4.3 },
+        Koi { x: tw as f64 * 0.5, y: th as f64 * 0.25, heading: 1.8,
+              speed: 2.8, turn_rate: 0.0, target_turn: 0.0, turn_timer: 4.0, id: 7.1 },
+        Koi { x: tw as f64 * 0.4, y: th as f64 * 0.7, heading: 5.2,
+              speed: 3.2, turn_rate: 0.0, target_turn: 0.0, turn_timer: 1.5, id: 9.8 },
     ];
 
     let mut elapsed = 0.0f64;
