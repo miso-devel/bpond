@@ -322,7 +322,7 @@ fn main() -> Result<()> {
             if cw < 4 || ch < 4 { return; }
             let mut canvas = Canvas::new(cw, ch);
 
-            let koi_scale = (ch as f64 * 4.0 / 22.0).min(cw as f64 * 2.0 / 22.0);
+            let koi_scale = (ch as f64 * 4.0 / 6.0).min(cw as f64 * 2.0 / 6.0);
             let kcx = koi.x * canvas.w as f64;
             let kcy = koi.y * canvas.h as f64;
             draw_koi(&mut canvas, elapsed, kcx, kcy, koi_scale, &koi);
