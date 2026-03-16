@@ -138,7 +138,7 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     }
     k.turn_rate = k.turn_rate.clamp(-0.45, 0.45);
 
-    let swim_wave = (t * 2.0 * PI * FREQ).sin() * 0.06;
+    let swim_wave = (t * 2.0 * PI * FREQ).sin() * 0.10;
     k.heading += (k.turn_rate + swim_wave) * dt;
 
     let margin = 5.0;
@@ -204,14 +204,16 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, scale: f64, off_x: f64, off_
         }
     }
 
-    // Tail fin
-    let tail_pitch = (2.0 * PI * freq * t).cos() * 0.8;
+    // Tail fin — fixed fan shape, rides on the spine's natural sway.
+    // No pitch oscillation in spread (that caused "stretch/shrink").
+    // The spine chain already swings the tail left/right via swim_wave.
     for lobe in [-1.0f64, 1.0] {
-        for ti in 0..18 {
-            let ft = ti as f64 / 18.0;
+        for ti in 0..20 {
+            let ft = ti as f64 / 20.0;
             let idx = (N_SPINE - 7 + (ft * 6.0) as usize).min(N_SPINE - 1);
             let (nx, ny) = normal_at(idx);
-            let spread = lobe * (0.3 + ft * 3.0 + tail_pitch * ft);
+            // Constant fan spread — widens from root to tip
+            let spread = lobe * (0.3 + ft * 2.8);
             let (px, py) = to_px(koi.spine_x[idx] + nx * spread, koi.spine_y[idx] + ny * spread);
             let a = (1.0 - ft * 0.3) * 0.55;
             canvas.thick(px, py, (225.0 * a) as u8, (215.0 * a) as u8, (195.0 * a) as u8);
@@ -295,10 +297,10 @@ fn main() -> Result<()> {
     let w = tw as f64;
     let h = th as f64;
     let mut fish = vec![
-        Koi::new(w * 0.3, h * 0.35, 0.3, 3.5, 1.0),
-        Koi::new(w * 0.7, h * 0.6, 3.5, 3.0, 4.3),
-        Koi::new(w * 0.5, h * 0.25, 1.8, 2.8, 7.1),
-        Koi::new(w * 0.4, h * 0.7, 5.2, 3.2, 11.5),
+        Koi::new(w * 0.3, h * 0.35, 0.3, 5.5, 1.0),
+        Koi::new(w * 0.7, h * 0.6, 3.5, 5.0, 4.3),
+        Koi::new(w * 0.5, h * 0.25, 1.8, 4.5, 7.1),
+        Koi::new(w * 0.4, h * 0.7, 5.2, 5.2, 11.5),
     ];
 
     let mut elapsed = 0.0f64;
