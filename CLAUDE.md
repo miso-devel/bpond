@@ -1,11 +1,12 @@
 # terminal-zoo
 
-ASCIIアート動物がぬるぬる浮遊するTUI。ratatui + 60fps。
+Procedural koi pond animation in the terminal. Braille sub-pixel rendering + chain-dynamics spine.
 
 ## Build & Run
 
 ```bash
 make run          # デバッグビルド → 実行
+make watch        # ファイル変更時に自動リビルド (cargo-watch)
 make debug        # RUST_BACKTRACE=1 付きで実行
 make release      # リリースビルド（最適化あり）
 make run-release  # リリースバイナリ実行
@@ -26,26 +27,25 @@ make clean     # ビルド成果物削除
 
 ```
 src/
-├── main.rs              # App構造体、描画ループ、文字密度マッピング
-└── animals/
-    ├── mod.rs           # AnimalDef 構造体 + ANIMAL_DEFS 一覧
-    ├── cat.rs
-    ├── dog.rs
-    ├── fish.rs
-    └── rabbit.rs
+├── main.rs      # イベントループ、水面描画、ヘッダー
+├── canvas.rs    # Braille サブピクセルキャンバス (1セル = 2×4ドット)
+└── koi.rs       # 鯉: チェーンダイナミクス脊椎、体/ヒレ/尾の描画
 ```
 
-### 動物の追加方法
+### 技術的なポイント
 
-1. `src/animals/` に新ファイル作成
-2. `ART_A`(通常), `ART_B`(瞬き), `DEF` を定義
-3. `mod.rs` に追加
+- **チェーンダイナミクス**: 40セグメントのワールド座標チェーン。頭が前進し、各セグメントが前のセグメントを追従。旋回時に体が自然にC字/S字に曲がる
+- **Braille レンダリング**: Unicode braille (U+2800) で1セルあたり2×4=8サブピクセル。通常の8倍の解像度
+- **均一スケール**: sx=sy にすることで heading によるサイズ変化を防止
+- **生物力学ヒレ**: 角度ベースの開閉 (rest + amp × sin(ωt + phase))、左右交互
 
-### ASCIIアートの文字密度ルール
+### 変更時の注意
 
-文字 → 輝度: `@`=100%, `$`=90%, `%`=78%, `*`=60%, `=`=50%, `+`=40%, `·`=12%
+- ブランチを切って作業し、承認されなければ捨てる
+- ヒレのパラメータはワールド座標系（セル単位）で指定。スケール変更時は要調整
+- `SEG_LEN` を変えると体長が変わり、`BODY_TOTAL` を通じて体幅・ヒレサイズも連動
 
 ## Key Bindings
 
-- `←` / `→` / `n` / `p` — 動物切り替え
+- `↑` / `↓` — 速度調整
 - `q` / `Esc` — 終了
