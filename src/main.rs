@@ -47,10 +47,10 @@ impl Canvas {
                     }
                 }
                 if bits == 0 { continue; }
-                let sx = ox as i32 + cx as i32;
-                let sy = oy as i32 + cy as i32;
-                if sx < 0 || sy < 0 || sx >= area.width as i32 || sy >= area.height as i32 { continue; }
-                let cell = &mut buf[(sx as u16, sy as u16)];
+                let bx = ox as i32 + cx as i32;
+                let by = oy as i32 + cy as i32;
+                if bx < 0 || by < 0 || bx >= area.width as i32 || by >= area.height as i32 { continue; }
+                let cell = &mut buf[(bx as u16, by as u16)];
                 cell.set_char(char::from_u32(BRAILLE_BASE + bits).unwrap_or(' '));
                 cell.set_fg(Color::Rgb((tr / n) as u8, (tg / n) as u8, (tb / n) as u8));
                 cell.set_style(Style::default());
@@ -64,10 +64,8 @@ impl Canvas {
 const N_SPINE: usize = 40;
 const SEG_LEN: f64 = 0.38;
 const FREQ: f64 = 1.2;
-// Body total length ~ N_SPINE * SEG_LEN = 15.2 world units
 const BODY_TOTAL: f64 = N_SPINE as f64 * SEG_LEN;
 
-// Body half-width as fraction of BODY_TOTAL, then scaled to world units
 fn body_width(s: f64) -> f64 {
     let frac = if s < 0.05 { s / 0.05 * 0.10 }
         else if s < 0.15 { 0.10 + (s - 0.05) / 0.10 * 0.08 }
@@ -103,13 +101,10 @@ impl Koi {
             koi.spine_x[i] = x - (i as f64) * SEG_LEN * heading.cos();
             koi.spine_y[i] = y - (i as f64) * SEG_LEN * heading.sin();
         }
-        // Random red patches: 2-5 patches, each 3-8 segments wide
         let n_patches = 2 + ((id * 3.7).sin().abs() * 3.5) as usize;
         for p in 0..n_patches {
-            let seed_pos = (id * (p as f64 + 1.0) * 2.3 + 0.7).sin().abs();
-            let seed_wid = (id * (p as f64 + 1.0) * 1.7 + 1.3).cos().abs();
-            let center = (seed_pos * 0.7 + 0.08) * N_SPINE as f64;
-            let half_w = (seed_wid * 0.12 + 0.04) * N_SPINE as f64;
+            let center = ((id * (p as f64 + 1.0) * 2.3 + 0.7).sin().abs() * 0.7 + 0.08) * N_SPINE as f64;
+            let half_w = ((id * (p as f64 + 1.0) * 1.7 + 1.3).cos().abs() * 0.12 + 0.04) * N_SPINE as f64;
             for i in 0..N_SPINE {
                 if (i as f64 - center).abs() < half_w {
                     koi.red_mask[i] = true;
@@ -143,11 +138,9 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     }
     k.turn_rate = k.turn_rate.clamp(-0.45, 0.45);
 
-    // Swimming undulation on heading
     let swim_wave = (t * 2.0 * PI * FREQ).sin() * 0.06;
     k.heading += (k.turn_rate + swim_wave) * dt;
 
-    // Steer back only when fully off-screen
     let margin = 5.0;
     let fully_out = k.spine_x[0] < -margin || k.spine_x[0] > w + margin
         || k.spine_y[0] < -margin || k.spine_y[0] > h + margin;
@@ -158,10 +151,8 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     }
 
     let burst = if (t * 0.1 + k.id).sin() > 0.97 { 1.5 } else { 1.0 };
-    let spd = k.speed * burst;
-
-    k.spine_x[0] += k.heading.cos() * spd * dt;
-    k.spine_y[0] += k.heading.sin() * spd * dt;
+    k.spine_x[0] += k.heading.cos() * k.speed * burst * dt;
+    k.spine_y[0] += k.heading.sin() * k.speed * burst * dt;
 
     for i in 1..N_SPINE {
         let dx = k.spine_x[i - 1] - k.spine_x[i];
@@ -177,11 +168,12 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
 
 // ─── Drawing ────────────────────────────────────────────────────────────────
 
-fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
+fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, scale: f64, off_x: f64, off_y: f64) {
     let freq = FREQ;
 
+    // World → sub-pixel. Use UNIFORM scale so shape doesn't distort with heading.
     let to_px = |wx: f64, wy: f64| -> (i32, i32) {
-        ((wx * sx) as i32, (wy * sy) as i32)
+        ((wx * scale + off_x) as i32, (wy * scale + off_y) as i32)
     };
 
     let tangent_at = |i: usize| -> (f64, f64) {
@@ -203,7 +195,7 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         let s = i as f64 / N_SPINE as f64;
         let hw = body_width(s) * 0.7;
         let (nx, ny) = normal_at(i);
-        let steps = (hw * sx.max(sy) * 1.2) as i32 + 1;
+        let steps = (hw * scale * 1.2) as i32 + 1;
         for pi in -steps..=steps {
             let p = pi as f64 / (steps as f64 / hw);
             if p.abs() > hw { continue; }
@@ -213,59 +205,61 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
     }
 
     // Tail fin
-    let tail_pitch = (2.0 * PI * freq * t).cos() * 1.5;
+    let tail_pitch = (2.0 * PI * freq * t).cos() * 0.8;
     for lobe in [-1.0f64, 1.0] {
-        for ti in 0..20 {
-            let ft = ti as f64 / 20.0;
+        for ti in 0..18 {
+            let ft = ti as f64 / 18.0;
             let idx = (N_SPINE - 7 + (ft * 6.0) as usize).min(N_SPINE - 1);
             let (nx, ny) = normal_at(idx);
-            let spread = lobe * (0.5 + ft * 5.0 + tail_pitch * ft);
+            let spread = lobe * (0.3 + ft * 3.0 + tail_pitch * ft);
             let (px, py) = to_px(koi.spine_x[idx] + nx * spread, koi.spine_y[idx] + ny * spread);
             let a = (1.0 - ft * 0.3) * 0.55;
             canvas.thick(px, py, (225.0 * a) as u8, (215.0 * a) as u8, (195.0 * a) as u8);
         }
     }
 
-    // Pectoral fins (at ~20%) — fan open/close
-    // Spread and phase must be large enough in cell-space to be visible
-    // Body half-width is ~2.7 cells, fins should extend well beyond that
+    // Pectoral fins (angle-based: rest angle + oscillation, left/right alternate)
     let pec_idx = (N_SPINE as f64 * 0.2) as usize;
-    let fin_phase = (t * 2.5).sin() * 2.5; // ±2.5 cells of oscillation
+    let pec_rest = 15.0f64.to_radians();
+    let pec_amp = 30.0f64.to_radians();
     if pec_idx < N_SPINE {
         let (nx, ny) = normal_at(pec_idx);
         let (tx, ty) = tangent_at(pec_idx);
-        for side in [-1.0f64, 1.0] {
-            for fi in 0..24 {
-                let ft = fi as f64 / 24.0;
-                // Fan: base extends ~5 cells from body, tip ~9 cells, phase swings ±2.5
-                let spread = side * (5.0 + ft * 4.0 + fin_phase * (0.5 + ft));
-                // Tip trails behind along body
-                let along = -ft * 6.0;
+        for (side, is_left) in [(-1.0f64, true), (1.0, false)] {
+            let phase = if is_left { 0.0 } else { PI };
+            let angle = pec_rest + pec_amp * (2.0 * PI * freq * t + phase).sin();
+            let fin_len = BODY_TOTAL * 0.12;
+            for fi in 0..12 {
+                let ft = fi as f64 / 12.0;
+                let spread = side * (angle.sin() * (1.0 - ft * 0.5)) * 1.5;
+                let along = -ft * fin_len;
                 let wx = koi.spine_x[pec_idx] + nx * spread + tx * along;
                 let wy = koi.spine_y[pec_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
-                let a = (1.0 - ft * 0.6) * 0.5;
-                canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
+                let a = (1.0 - ft) * 0.5;
+                canvas.thick(px, py, (210.0 * a) as u8, (200.0 * a) as u8, (182.0 * a) as u8);
             }
         }
     }
 
-    // Pelvic fins (at ~45%) — same fan, smaller
-    let pel_phase = (t * 2.5 + 1.0).sin() * 1.5;
+    // Pelvic fins (same angle-based, smaller, at ~45%)
     let pel_idx = (N_SPINE as f64 * 0.45) as usize;
     if pel_idx < N_SPINE {
         let (nx, ny) = normal_at(pel_idx);
         let (tx, ty) = tangent_at(pel_idx);
-        for side in [-1.0f64, 1.0] {
-            for fi in 0..16 {
-                let ft = fi as f64 / 16.0;
-                let spread = side * (3.5 + ft * 3.0 + pel_phase * (0.5 + ft));
-                let along = -ft * 4.0;
+        for (side, is_left) in [(-1.0f64, true), (1.0, false)] {
+            let phase = if is_left { 0.5 } else { PI + 0.5 };
+            let angle = 10.0f64.to_radians() + 20.0f64.to_radians() * (2.0 * PI * freq * t + phase).sin();
+            let fin_len = BODY_TOTAL * 0.08;
+            for fi in 0..8 {
+                let ft = fi as f64 / 8.0;
+                let spread = side * (angle.sin() * (1.0 - ft * 0.5)) * 1.0;
+                let along = -ft * fin_len;
                 let wx = koi.spine_x[pel_idx] + nx * spread + tx * along;
                 let wy = koi.spine_y[pel_idx] + ny * spread + ty * along;
                 let (px, py) = to_px(wx, wy);
-                let a = (1.0 - ft * 0.6) * 0.45;
-                canvas.thick(px, py, (215.0 * a) as u8, (205.0 * a) as u8, (185.0 * a) as u8);
+                let a = (1.0 - ft) * 0.45;
+                canvas.thick(px, py, (210.0 * a) as u8, (200.0 * a) as u8, (182.0 * a) as u8);
             }
         }
     }
@@ -275,7 +269,7 @@ fn draw_koi(canvas: &mut Canvas, t: f64, koi: &Koi, sx: f64, sy: f64) {
         let s = i as f64 / N_SPINE as f64;
         let hw = body_width(s);
         let (nx, ny) = normal_at(i);
-        let steps = (hw * sx.max(sy) * 2.0) as i32 + 1;
+        let steps = (hw * scale * 2.0) as i32 + 1;
         for pi in -steps..=steps {
             let p = pi as f64 / (steps as f64 / hw);
             if p.abs() > hw { continue; }
@@ -342,11 +336,18 @@ fn main() -> Result<()> {
             if cw < 4 || ch < 4 { return; }
             let mut canvas = Canvas::new(cw, ch);
 
-            let scale_x = canvas.w as f64 / area.width as f64;
-            let scale_y = canvas.h as f64 / area.height as f64;
+            // UNIFORM scale: use the same scale for x and y so the fish
+            // doesn't change size when it turns. Braille's 2:4 sub-pixel
+            // ratio handles the terminal's character aspect ratio.
+            let scale = (canvas.h as f64 / (th as f64)).min(canvas.w as f64 / (tw as f64));
+
+            // Offset so world origin (0,0) maps to canvas origin
+            // World coords are in terminal cells, canvas is in sub-pixels
+            let off_x = 0.0;
+            let off_y = 0.0;
 
             for k in &fish {
-                draw_koi(&mut canvas, elapsed, k, scale_x, scale_y);
+                draw_koi(&mut canvas, elapsed, k, scale, off_x, off_y);
             }
             canvas.render(buf, 0, 1, area);
 
