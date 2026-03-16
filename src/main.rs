@@ -16,14 +16,12 @@ const BRAILLE_DOT: [[u32; 4]; 2] = [
 
 struct Canvas {
     w: usize, h: usize, cw: usize,
-    #[allow(dead_code)]
-    ch: usize,
     px: Vec<(bool, u8, u8, u8)>,
 }
 
 impl Canvas {
     fn new(cw: usize, ch: usize) -> Self {
-        Canvas { w: cw * 2, h: ch * 4, cw, ch, px: vec![(false, 0, 0, 0); cw * 2 * ch * 4] }
+        Canvas { w: cw * 2, h: ch * 4, cw, px: vec![(false, 0, 0, 0); cw * 2 * ch * 4] }
     }
     fn dot(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8) {
         if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h {
@@ -33,7 +31,6 @@ impl Canvas {
     fn fat(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8) {
         for dy in 0..2 { for dx in 0..2 { self.dot(x + dx, y + dy, r, g, b); } }
     }
-    // Thick stroke: 3×3 sub-pixels
     fn thick(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8) {
         for dy in -1..=1 { for dx in -1..=1 { self.dot(x + dx, y + dy, r, g, b); } }
     }
@@ -71,17 +68,22 @@ fn amplitude(x: f64) -> f64 {
     BODY_LEN * (0.02 - 0.08 * x + 0.16 * x * x)
 }
 
-fn midline(x: f64, t: f64, turn: f64, freq: f64) -> f64 {
-    let a = amplitude(x);
+fn midline(s: f64, t: f64, turn: f64, freq: f64) -> f64 {
+    let a = amplitude(s);
     let k = 2.0 * PI / BODY_LEN;
     let omega = 2.0 * PI * freq;
-    let wave = a * (k * x * BODY_LEN - omega * t).sin();
-    let turn_curve = turn * 0.18 * BODY_LEN * x.powf(1.8);
+    let wave = a * (k * s * BODY_LEN - omega * t).sin();
+
+    // Turn: HEAD leads, tail follows. Curvature concentrated at FRONT.
+    // (1 - s)^1.5 means head (s=0) bends most, tail (s=1) barely bends
+    let turn_curve = turn * 0.25 * BODY_LEN * (1.0 - s).powf(1.5);
+
     let asym = if (wave > 0.0 && turn > 0.0) || (wave < 0.0 && turn < 0.0) {
         1.0 + 0.2 * turn.abs().min(1.0)
     } else {
         1.0 - 0.2 * turn.abs().min(1.0)
     };
+
     turn_curve + wave * asym
 }
 
@@ -113,16 +115,13 @@ fn tgt(s: f64, t: f64, turn: f64, freq: f64) -> (f64, f64, f64, f64) {
     (-dy / l, dx / l, x1, y1)
 }
 
-// Draw a fin (pectoral or pelvic) as a thick paddle shape
 fn draw_fin(canvas: &mut Canvas, s_pos: f64, t: f64, turn: f64, freq: f64,
-    heading: f64, cx: f64, cy: f64, scale: f64,
-    side: f64, fin_len: f64, fin_width: f64, phase: f64, amplitude: f64,
+    heading: f64, cx: f64, cy: f64, sx: f64, sy: f64,
+    side: f64, fin_len: f64, fin_width: f64, phase: f64, amp: f64,
     color: (u8, u8, u8))
 {
-    let cos_h = heading.cos();
-    let sin_h = heading.sin();
-
-    let angle = amplitude * (2.0 * PI * freq * t + phase).sin();
+    let cos_h = heading.cos(); let sin_h = heading.sin();
+    let angle = amp * (2.0 * PI * freq * t + phase).sin();
     let (fnx, fny, fpx, fpy) = tgt(s_pos, t, turn, freq);
     let (_, _, fpx2, fpy2) = tgt(s_pos + 0.02, t, turn, freq);
     let tdx = fpx2 - fpx; let tdy = fpy2 - fpy;
@@ -136,18 +135,17 @@ fn draw_fin(canvas: &mut Canvas, s_pos: f64, t: f64, turn: f64, freq: f64,
         let fy = fpy + fny * spread + tdy / tl * along;
         let wx = fx * cos_h - fy * sin_h;
         let wy = fx * sin_h + fy * cos_h;
-        let sx = (cx + wx * scale) as i32;
-        let sy = (cy + wy * scale) as i32;
+        let px = (cx + wx * sx) as i32;
+        let py = (cy + wy * sy) as i32;
         let a = 1.0 - ft * 0.5;
-        // Thick fin strokes
-        canvas.thick(sx, sy,
+        canvas.thick(px, py,
             (color.0 as f64 * a) as u8,
             (color.1 as f64 * a) as u8,
             (color.2 as f64 * a) as u8);
     }
 }
 
-fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, scale: f64, koi: &Koi) {
+fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, sx: f64, sy: f64, koi: &Koi) {
     let cos_h = koi.heading.cos();
     let sin_h = koi.heading.sin();
     let freq = FREQ;
@@ -155,7 +153,7 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, scale: f64, koi: &Koi
     let xform = |lx: f64, ly: f64| -> (i32, i32) {
         let wx = lx * cos_h - ly * sin_h;
         let wy = lx * sin_h + ly * cos_h;
-        ((cx + wx * scale) as i32, (cy + wy * scale) as i32)
+        ((cx + wx * sx) as i32, (cy + wy * sy) as i32)
     };
 
     // Shadow
@@ -163,16 +161,16 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, scale: f64, koi: &Koi
         let s = si as f64 / 40.0;
         let hw = body_width(s) * 0.75;
         let (nx, ny, px, py) = tgt(s, t, koi.turn_rate, freq);
-        let steps = (hw * scale * 1.5) as i32 + 1;
+        let steps = (hw * sx.max(sy) * 1.5) as i32 + 1;
         for pi in -steps..=steps {
             let p = pi as f64 / (steps as f64 / hw);
             if p.abs() > hw { continue; }
-            let (sx, sy) = xform(px + nx * p, py + ny * p);
-            canvas.dot(sx + 3, sy + 4, 5, 9, 16);
+            let (dx, dy) = xform(px + nx * p, py + ny * p);
+            canvas.dot(dx + 3, dy + 4, 5, 9, 16);
         }
     }
 
-    // Tail fin (short, thick, two lobes)
+    // Tail fin
     let tail_pitch = (2.0 * PI * freq * t).cos() * 0.25;
     for lobe in [-1.0f64, 1.0] {
         for ti in 0..14 {
@@ -180,51 +178,49 @@ fn draw_koi(canvas: &mut Canvas, t: f64, cx: f64, cy: f64, scale: f64, koi: &Koi
             let s_pos = (0.86 + ft * 0.14).min(0.99);
             let (tnx, tny, tpx, tpy) = tgt(s_pos, t, koi.turn_rate, freq);
             let spread = lobe * (0.08 + ft * 1.0 + tail_pitch * ft);
-            let (sx, sy) = xform(tpx + tnx * spread, tpy + tny * spread);
+            let (dx, dy) = xform(tpx + tnx * spread, tpy + tny * spread);
             let a = (1.0 - ft * 0.3) * 0.55;
-            canvas.thick(sx, sy, (200.0 * a) as u8, (190.0 * a) as u8, (175.0 * a) as u8);
+            canvas.thick(dx, dy, (200.0 * a) as u8, (190.0 * a) as u8, (175.0 * a) as u8);
         }
     }
 
-    // Pectoral fins (at s=0.22, thick paddles, left/right alternate)
-    let fin_color = (185, 178, 165);
+    // Pectoral fins (s=0.22)
+    let fin_c = (185, 178, 165);
     for (side, is_left) in [(-1.0f64, true), (1.0, false)] {
-        let phase = if is_left { 0.0 } else { PI };
-        draw_fin(canvas, 0.22, t, koi.turn_rate, freq,
-            koi.heading, cx, cy, scale,
-            side, BODY_LEN * 0.10, 1.3, phase, 0.4, fin_color);
+        let ph = if is_left { 0.0 } else { PI };
+        draw_fin(canvas, 0.22, t, koi.turn_rate, freq, koi.heading, cx, cy, sx, sy,
+            side, BODY_LEN * 0.10, 1.3, ph, 0.4, fin_c);
     }
 
-    // Pelvic (ventral) fins (at s=0.45, smaller, same alternation)
+    // Pelvic (ventral) fins (s=0.45)
     for (side, is_left) in [(-1.0f64, true), (1.0, false)] {
-        let phase = if is_left { 0.5 } else { PI + 0.5 };
-        draw_fin(canvas, 0.45, t, koi.turn_rate, freq,
-            koi.heading, cx, cy, scale,
-            side, BODY_LEN * 0.07, 0.9, phase, 0.3, fin_color);
+        let ph = if is_left { 0.5 } else { PI + 0.5 };
+        draw_fin(canvas, 0.45, t, koi.turn_rate, freq, koi.heading, cx, cy, sx, sy,
+            side, BODY_LEN * 0.07, 1.0, ph, 0.3, fin_c);
     }
 
-    // Body
+    // Body (drawn LAST so it's on top of fins)
     for si in 0..60 {
         let s = si as f64 / 60.0;
         let hw = body_width(s);
         let (nx, ny, px, py) = tgt(s, t, koi.turn_rate, freq);
-        let steps = (hw * scale * 2.0) as i32 + 1;
+        let steps = (hw * sx.max(sy) * 2.0) as i32 + 1;
         for pi in -steps..=steps {
             let p = pi as f64 / (steps as f64 / hw);
             if p.abs() > hw { continue; }
             let np = (p / hw).abs();
-            let (sx, sy) = xform(px + nx * p, py + ny * p);
+            let (dx, dy) = xform(px + nx * p, py + ny * p);
             let outline = np > 0.82;
             let red = is_red(s, p / hw, koi.id);
             let (r, g, b) = if outline { (48, 44, 36) }
                 else if red { (218, 56, 36) }
                 else { (240, 236, 225) };
-            canvas.fat(sx, sy, r, g, b);
+            canvas.fat(dx, dy, r, g, b);
         }
     }
 }
 
-// ─── Koi movement ───────────────────────────────────────────────────────────
+// ─── Koi state ──────────────────────────────────────────────────────────────
 
 struct Koi {
     x: f64, y: f64, heading: f64,
@@ -237,18 +233,14 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
     if k.turn_timer <= 0.0 {
         let s1 = ((k.id * 7.3 + t * 3.1).sin() * 1e4).fract();
         let s2 = ((k.id * 11.7 + t * 2.3).cos() * 1e4).fract();
-
-        // Mostly straight, sometimes gentle turn, rarely sharp
-        k.target_turn = if s1 > 0.92 { 0.4 }      // rare sharp right
-            else if s1 < 0.08 { -0.4 }              // rare sharp left
-            else if s1 > 0.75 { 0.15 }              // gentle right
-            else if s1 < 0.25 { -0.15 }             // gentle left
-            else { 0.0 };                            // straight (50% of time)
-
-        k.turn_timer = 2.0 + s2 * 5.0; // 2-7 seconds per decision
+        k.target_turn = if s1 > 0.92 { 0.4 }
+            else if s1 < 0.08 { -0.4 }
+            else if s1 > 0.75 { 0.15 }
+            else if s1 < 0.25 { -0.15 }
+            else { 0.0 };
+        k.turn_timer = 2.0 + s2 * 5.0;
     }
 
-    // Smoothly approach target turn (from random decisions above)
     let approach = 0.6 * dt;
     if (k.target_turn - k.turn_rate).abs() < approach {
         k.turn_rate = k.target_turn;
@@ -258,29 +250,24 @@ fn update_koi(k: &mut Koi, dt: f64, t: f64, w: f64, h: f64) {
         k.turn_rate -= approach;
     }
     k.turn_rate = k.turn_rate.clamp(-0.45, 0.45);
-
     k.heading += k.turn_rate * dt;
 
-    // Gentle heading bias toward screen center — NOT overriding turn_rate,
-    // just nudging heading directly so the fish "wants" to stay in view.
-    // Strength increases with distance from center (quadratic).
+    // Gentle heading bias toward center (quadratic, very subtle)
     let cx = w / 2.0;
     let cy = h / 2.0;
-    let dx = k.x - cx;
-    let dy = k.y - cy;
-    let dist = ((dx / w).powi(2) + (dy / h).powi(2)).sqrt(); // 0 at center, ~0.7 at corner
-    if dist > 0.3 {
-        let strength = (dist - 0.3).powi(2) * 0.15;
+    let dx = (k.x - cx) / w;
+    let dy = (k.y - cy) / h;
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist > 0.25 {
+        let strength = (dist - 0.25).powi(2) * 0.12;
         let toward = (cy - k.y).atan2(cx - k.x);
         let diff = (toward - k.heading + PI).rem_euclid(2.0 * PI) - PI;
         k.heading += diff * strength * dt;
     }
 
-    // Constant speed, with very rare brief burst
-    let burst = if (t * 0.1 + k.id).sin() > 0.97 { 1.6 } else { 1.0 };
+    let burst = if (t * 0.1 + k.id).sin() > 0.97 { 1.5 } else { 1.0 };
     k.x += k.heading.cos() * k.speed * burst * dt;
     k.y += k.heading.sin() * k.speed * burst * dt;
-    // No clamp — fish can go off-screen and come back
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -291,14 +278,10 @@ fn main() -> Result<()> {
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut fish = vec![
-        Koi {
-            x: tw as f64 * 0.35, y: th as f64 * 0.45, heading: 0.3,
-            speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0,
-        },
-        Koi {
-            x: tw as f64 * 0.65, y: th as f64 * 0.55, heading: 3.5,
-            speed: 3.0, turn_rate: 0.0, target_turn: 0.0, turn_timer: 2.0, id: 4.3,
-        },
+        Koi { x: tw as f64 * 0.35, y: th as f64 * 0.45, heading: 0.3,
+              speed: 3.5, turn_rate: 0.0, target_turn: 0.0, turn_timer: 3.0, id: 1.0 },
+        Koi { x: tw as f64 * 0.65, y: th as f64 * 0.55, heading: 3.5,
+              speed: 3.0, turn_rate: 0.0, target_turn: 0.0, turn_timer: 2.0, id: 4.3 },
     ];
 
     let mut elapsed = 0.0f64;
@@ -325,9 +308,7 @@ fn main() -> Result<()> {
                     let cell = &mut buf[(x, y)];
                     cell.set_char(' ');
                     cell.set_bg(Color::Rgb(
-                        (10.0 + r * 4.0) as u8,
-                        (18.0 + r * 6.0) as u8,
-                        (32.0 + r * 9.0) as u8,
+                        (10.0 + r * 4.0) as u8, (18.0 + r * 6.0) as u8, (32.0 + r * 9.0) as u8,
                     ));
                     cell.set_fg(Color::Rgb(10, 18, 32));
                 }
@@ -337,13 +318,19 @@ fn main() -> Result<()> {
             let ch = (area.height as usize).saturating_sub(1);
             if cw < 4 || ch < 4 { return; }
             let mut canvas = Canvas::new(cw, ch);
-            // Scale koi relative to terminal size — resizes in real-time
-            let koi_scale = (ch as f64 * 4.0 / 8.0).min(cw as f64 * 2.0 / 8.0);
+
+            // Separate x/y scales for correct aspect ratio at any terminal size
+            // Terminal chars are ~2x taller than wide, braille sub-pixels compensate:
+            //   horizontal: 2 sub-px per char
+            //   vertical: 4 sub-px per char
+            // So 1 unit should be: scale_x sub-px horizontally, scale_y sub-px vertically
+            let scale_x = canvas.w as f64 / 14.0;  // koi body ~5 units, screen ~14 units wide
+            let scale_y = canvas.h as f64 / 14.0;
 
             for k in &fish {
                 let kcx = k.x / area.width as f64 * canvas.w as f64;
                 let kcy = k.y / area.height as f64 * canvas.h as f64;
-                draw_koi(&mut canvas, elapsed, kcx, kcy, koi_scale, k);
+                draw_koi(&mut canvas, elapsed, kcx, kcy, scale_x, scale_y, k);
             }
             canvas.render(buf, 0, 1, area);
 
