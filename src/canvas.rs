@@ -73,6 +73,7 @@ impl Canvas {
             for cx in 0..self.cw {
                 let mut bits = 0u32;
                 let (mut tr, mut tg, mut tb, mut n) = (0u32, 0u32, 0u32, 0u32);
+                #[allow(clippy::needless_range_loop)]
                 for dy in 0..4usize {
                     for dx in 0..2usize {
                         let (on, r, g, b) = self.px[(cy * 4 + dy) * self.w + cx * 2 + dx];

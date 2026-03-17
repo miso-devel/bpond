@@ -2,7 +2,7 @@
 
 # Default: build and run
 run: build
-	./target/debug/terminal-zoo
+	./target/debug/mini-pond
 
 # Debug build
 build:
@@ -18,7 +18,7 @@ release:
 
 # Run release binary
 run-release: release
-	./target/release/terminal-zoo
+	./target/release/mini-pond
 
 # Check compilation without building
 check:

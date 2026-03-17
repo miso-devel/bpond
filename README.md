@@ -1,18 +1,36 @@
-# terminal-zoo 🐟
+<h1 align="center">
+  mini-pond
+  <br>
+  <sub>Procedural koi pond in your terminal</sub>
+</h1>
 
-Procedural koi fish swimming in your terminal — built with Rust, ratatui, and Unicode braille characters.
+<p align="center">
+  <img src="https://img.shields.io/badge/lang-Rust-orange?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/TUI-ratatui-blue" alt="ratatui">
+  <img src="https://img.shields.io/badge/rendering-braille-purple" alt="braille">
+  <img src="https://img.shields.io/badge/fps-60-green" alt="60fps">
+</p>
 
-![Koi Pond](https://img.shields.io/badge/Rust-ratatui-blue)
+<p align="center">
+  Chain-dynamics spine physics / braille sub-pixel rendering / biomechanics fin animation
+</p>
+
+<p align="center">
+  <img src="./assets/demo.gif" alt="demo" width="600">
+</p>
+
+---
 
 ## Features
 
-- **Chain-dynamics spine**: Each koi has a 40-segment chain that naturally bends when turning — no rigid rotation
-- **Braille sub-pixel rendering**: 8× resolution using Unicode braille characters (U+2800–U+28FF)
-- **Biomechanics-accurate fins**: Angle-based pectoral/pelvic fin animation with left/right alternation
-- **Procedural kohaku patterns**: Red/white patches generated per-fish from pseudo-random seeds
-- **Animated water**: Subtle sine-based ripple pattern on the background
-- **Responsive**: Koi scale adapts to terminal size in real-time
-- **60fps**: Smooth animation at ~60 frames per second
+| | Feature | Detail |
+|---|---|---|
+| 🦴 | **Chain-dynamics spine** | 40-segment chain — body bends into C/S shapes on turns, no rigid rotation |
+| 🔬 | **Braille sub-pixel** | 8× resolution via Unicode braille (U+2800–U+28FF), 2×4 dots per cell |
+| 🐠 | **Biomechanics fins** | Angle-based pectoral/pelvic oscillation, left/right anti-phase alternation |
+| 🎨 | **Kohaku patterns** | Unique red/white markings per fish from pseudo-random seeds |
+| 🌊 | **Animated water** | Sine-based ripple background |
+| 📐 | **Responsive** | Uniform scaling adapts to terminal size in real-time |
 
 ## Quick Start
 
@@ -20,7 +38,8 @@ Procedural koi fish swimming in your terminal — built with Rust, ratatui, and 
 cargo run
 ```
 
-Or with make:
+<details>
+<summary>More options (make)</summary>
 
 ```bash
 make run          # Debug build + run
@@ -29,34 +48,71 @@ make release      # Optimized release build
 make run-release  # Run release binary
 ```
 
-## Key Bindings
+</details>
+
+## Controls
 
 | Key | Action |
-|-----|--------|
+|:---:|--------|
+| `🖱 Click` | Drop food — koi swim toward it |
 | `↑` | Speed up |
 | `↓` | Slow down |
 | `q` / `Esc` | Quit |
+
+## How It Works
+
+> 4 koi fish swim autonomously with procedural physics — no keyframe animation, no pre-baked frames.
+
+### Spine Chain
+
+Each koi is **40 world-space points** connected at fixed distance. The head moves forward, and each segment follows the one ahead. On turns, the body naturally curves — like a real fish.
+
+```
+Straight          Turning
+
+  ●─●─●─●─●─●      ●─●─●
+                          ╲
+                           ●─●─●
+```
+
+### Braille Rendering
+
+Each terminal cell = **2×4 sub-pixel grid** (8 dots). Body, fins, and tail are drawn as colored dots, then encoded as Unicode braille characters.
+
+```
+Terminal cell    Braille grid     Result
+
+  ┌──┐           ⡀ ⠄              ⣿
+  │  │           ⠂ ⠁
+  │  │           ⠐ ⠈
+  └──┘           ⢀ ⠠
+```
+
+### Fin Animation
+
+Pectoral and pelvic fins oscillate with:
+
+```
+angle = rest + amplitude × sin(ωt + phase)
+```
+
+Left/right fins alternate in anti-phase for natural paddling motion.
+
+### Pattern Generation
+
+Red kohaku patches are placed pseudo-randomly along the spine based on each fish's unique ID — every fish looks different.
 
 ## Architecture
 
 ```
 src/
-├── main.rs      # Event loop, water rendering, header
-├── canvas.rs    # Braille sub-pixel canvas (2×4 dots per cell)
-└── koi.rs       # Koi fish: spine chain physics, body/fin/tail drawing
+├── main.rs      Event loop, water background, header
+├── canvas.rs    Braille sub-pixel canvas (2×4 dots per cell)
+└── koi.rs       Koi physics (chain spine) + rendering (body/fin/tail)
 ```
 
-### How It Works
-
-**Spine Chain**: The koi body is 40 world-space points. Each frame, the head moves forward along its heading, and each subsequent point follows the one ahead at a fixed distance. When the head turns, the body naturally curves into a C/S shape — like a real fish.
-
-**Braille Rendering**: Each terminal cell is treated as a 2×4 grid of sub-pixels. The koi body, fins, and tail are drawn as colored dots into this grid, then encoded as Unicode braille characters with averaged foreground colors.
-
-**Fin Animation**: Pectoral and pelvic fins use angle-based oscillation (`rest + amplitude × sin(ωt + phase)`). Left and right fins alternate in anti-phase for a natural paddling motion.
-
-**Pattern Generation**: Red patches are placed pseudo-randomly along the spine based on each fish's unique ID, creating distinct kohaku-style markings per individual.
-
-## Development
+<details>
+<summary>Development commands</summary>
 
 ```bash
 make check     # Compile check
@@ -67,8 +123,16 @@ make ci        # fmt + lint + check + test
 make clean     # Clean build artifacts
 ```
 
+</details>
+
 ## Dependencies
 
-- [ratatui](https://github.com/ratatui/ratatui) — Terminal UI framework
-- [crossterm](https://github.com/crossterm-rs/crossterm) — Terminal manipulation
-- [color-eyre](https://github.com/eyre-rs/color-eyre) — Error reporting
+| Crate | Role |
+|-------|------|
+| [ratatui](https://github.com/ratatui/ratatui) | Terminal UI framework |
+| [crossterm](https://github.com/crossterm-rs/crossterm) | Terminal manipulation |
+| [color-eyre](https://github.com/eyre-rs/color-eyre) | Error reporting |
+
+## License
+
+MIT
