@@ -1,4 +1,4 @@
-# terminal-zoo
+# mini-pond
 
 Procedural koi pond animation in the terminal. Braille sub-pixel rendering + chain-dynamics spine.
 

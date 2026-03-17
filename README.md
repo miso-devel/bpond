@@ -1,5 +1,5 @@
 <h1 align="center">
-  terminal-zoo
+  mini-pond
   <br>
   <sub>Procedural koi pond in your terminal</sub>
 </h1>

@@ -116,7 +116,7 @@ fn main() -> Result<()> {
             // Header
             if area.width > 20 {
                 let hdr = format!(
-                    "  terminal-zoo  Koi Pond  speed:{:.1}x  \u{2191}\u{2193}:speed  q:quit",
+                    "  mini-pond  Koi Pond  speed:{:.1}x  \u{2191}\u{2193}:speed  q:quit",
                     speed
                 );
                 for (i, ch) in hdr.chars().enumerate() {
