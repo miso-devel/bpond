@@ -79,28 +79,46 @@ impl Koi {
     }
 
     /// Advance the koi by one time step.
-    pub fn update(&mut self, dt: f64, t: f64, w: f64, h: f64) {
-        // Periodic turn decisions
-        self.turn_timer -= dt;
-        if self.turn_timer <= 0.0 {
-            let s1 = ((self.id * 7.3 + t * 3.1).sin() * 1e4).fract();
-            let s2 = ((self.id * 11.7 + t * 2.3).cos() * 1e4).fract();
-            self.target_turn = if s1 > 0.92 {
-                0.4
-            } else if s1 < 0.08 {
-                -0.4
-            } else if s1 > 0.75 {
-                0.15
-            } else if s1 < 0.25 {
-                -0.15
-            } else {
-                0.0
-            };
-            self.turn_timer = 2.0 + s2 * 5.0;
+    pub fn update(&mut self, dt: f64, t: f64, w: f64, h: f64, foods: &[(f64, f64, f64)]) {
+        // Find nearest food
+        let nearest_food = foods.iter().map(|&(fx, fy, _)| {
+            let dx = fx - self.spine_x[0];
+            let dy = fy - self.spine_y[0];
+            (dx * dx + dy * dy, fx, fy)
+        }).min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        let chasing_food = nearest_food.is_some_and(|f| f.0 < 400.0);
+
+        if chasing_food {
+            let (_, fx, fy) = nearest_food.unwrap();
+            let toward = (fy - self.spine_y[0]).atan2(fx - self.spine_x[0]);
+            let diff = (toward - self.heading + PI).rem_euclid(2.0 * PI) - PI;
+            self.target_turn = diff.clamp(-0.45, 0.45);
+            self.turn_timer = 0.5;
+        } else {
+            // Periodic turn decisions
+            self.turn_timer -= dt;
+            if self.turn_timer <= 0.0 {
+                let s1 = ((self.id * 7.3 + t * 3.1).sin() * 1e4).fract();
+                let s2 = ((self.id * 11.7 + t * 2.3).cos() * 1e4).fract();
+                self.target_turn = if s1 > 0.92 {
+                    0.4
+                } else if s1 < 0.08 {
+                    -0.4
+                } else if s1 > 0.75 {
+                    0.15
+                } else if s1 < 0.25 {
+                    -0.15
+                } else {
+                    0.0
+                };
+                self.turn_timer = 2.0 + s2 * 5.0;
+            }
         }
 
         // Smoothly approach target turn rate
-        let approach = 0.6 * dt;
+        let approach_rate = if chasing_food { 2.0 } else { 0.6 };
+        let approach = approach_rate * dt;
         if (self.target_turn - self.turn_rate).abs() < approach {
             self.turn_rate = self.target_turn;
         } else if self.target_turn > self.turn_rate {
@@ -127,8 +145,14 @@ impl Koi {
             self.heading += diff * 0.3 * dt;
         }
 
-        // Move head forward
-        let burst = if (t * 0.1 + self.id).sin() > 0.97 { 1.5 } else { 1.0 };
+        // Move head forward — speed up when chasing food
+        let burst = if chasing_food {
+            1.6
+        } else if (t * 0.1 + self.id).sin() > 0.97 {
+            1.5
+        } else {
+            1.0
+        };
         self.spine_x[0] += self.heading.cos() * self.speed * burst * dt;
         self.spine_y[0] += self.heading.sin() * self.speed * burst * dt;
 
@@ -235,6 +259,7 @@ impl Koi {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_fin_pair(
         &self,
         canvas: &mut Canvas,

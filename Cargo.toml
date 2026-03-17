@@ -2,7 +2,7 @@
 name = "terminal-zoo"
 version = "0.3.0"
 edition = "2021"
-description = "Procedural ASCII art animation using SDF"
+description = "Procedural koi pond in your terminal — chain-dynamics spine, braille sub-pixel rendering"
 
 [dependencies]
 ratatui = "0.29"
