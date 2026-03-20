@@ -60,6 +60,16 @@ impl Canvas {
         }
     }
 
+    /// Check whether a sub-pixel is set (for testing).
+    #[cfg(test)]
+    pub fn get(&self, x: usize, y: usize) -> (bool, u8, u8, u8) {
+        if x < self.w && y < self.h {
+            self.px[y * self.w + x]
+        } else {
+            (false, 0, 0, 0)
+        }
+    }
+
     /// Render the canvas into a ratatui buffer using braille characters.
     pub fn render(
         &self,
@@ -100,5 +110,150 @@ impl Canvas {
                 cell.set_style(Style::default());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn new_canvas_dimensions() {
+        let c = Canvas::new(10, 5);
+        assert_eq!(c.w, 20);
+        assert_eq!(c.h, 20);
+    }
+
+    #[test]
+    fn dot_sets_pixel() {
+        let mut c = Canvas::new(10, 5);
+        c.dot(3, 7, 255, 128, 0);
+        let (on, r, g, b) = c.get(3, 7);
+        assert!(on);
+        assert_eq!((r, g, b), (255, 128, 0));
+    }
+
+    #[test]
+    fn dot_ignores_negative_coords() {
+        let mut c = Canvas::new(10, 5);
+        c.dot(-1, 0, 255, 0, 0);
+        c.dot(0, -1, 255, 0, 0);
+        // No panic, all pixels still off
+        assert!(!c.get(0, 0).0);
+    }
+
+    #[test]
+    fn dot_ignores_out_of_bounds() {
+        let mut c = Canvas::new(10, 5);
+        c.dot(20, 0, 255, 0, 0);
+        c.dot(0, 20, 255, 0, 0);
+        // No panic
+    }
+
+    #[test]
+    fn fat_sets_2x2_block() {
+        let mut c = Canvas::new(10, 5);
+        c.fat(4, 4, 100, 100, 100);
+        assert!(c.get(4, 4).0);
+        assert!(c.get(5, 4).0);
+        assert!(c.get(4, 5).0);
+        assert!(c.get(5, 5).0);
+        assert!(!c.get(3, 4).0);
+        assert!(!c.get(6, 4).0);
+    }
+
+    #[test]
+    fn thick_sets_3x3_block() {
+        let mut c = Canvas::new(10, 5);
+        c.thick(5, 5, 100, 100, 100);
+        for dy in -1..=1i32 {
+            for dx in -1..=1i32 {
+                assert!(
+                    c.get((5 + dx) as usize, (5 + dy) as usize).0,
+                    "pixel at ({}, {}) should be set",
+                    5 + dx,
+                    5 + dy
+                );
+            }
+        }
+        assert!(!c.get(3, 5).0);
+        assert!(!c.get(7, 5).0);
+    }
+
+    // -- render: braille encoding -------------------------------------------
+
+    fn make_buf(w: u16, h: u16) -> (Buffer, Rect) {
+        let area = Rect::new(0, 0, w, h);
+        (Buffer::empty(area), area)
+    }
+
+    #[test]
+    fn render_single_dot_top_left() {
+        // sub-pixel (0,0) in cell (0,0) → BRAILLE_DOT[0][0] = 0x01 → U+2801 '⠁'
+        let mut c = Canvas::new(4, 2);
+        c.dot(0, 0, 255, 0, 0);
+        let (mut buf, area) = make_buf(4, 3);
+        c.render(&mut buf, 0, 0, area);
+        assert_eq!(buf[(0u16, 0u16)].symbol(), "⠁");
+    }
+
+    #[test]
+    fn render_all_dots_in_cell() {
+        // Set all 8 sub-pixels in cell (0,0) → bits=0xFF → U+28FF '⣿'
+        let mut c = Canvas::new(4, 2);
+        for dy in 0..4 {
+            for dx in 0..2 {
+                c.dot(dx, dy, 255, 255, 255);
+            }
+        }
+        let (mut buf, area) = make_buf(4, 3);
+        c.render(&mut buf, 0, 0, area);
+        assert_eq!(buf[(0u16, 0u16)].symbol(), "⣿");
+    }
+
+    #[test]
+    fn render_averages_foreground_color() {
+        // Two dots: (255,0,0) and (0,255,0) → average (127,127,0)
+        let mut c = Canvas::new(4, 2);
+        c.dot(0, 0, 255, 0, 0);
+        c.dot(1, 0, 0, 255, 0);
+        let (mut buf, area) = make_buf(4, 3);
+        c.render(&mut buf, 0, 0, area);
+        let cell = &buf[(0u16, 0u16)];
+        assert_eq!(cell.fg, Color::Rgb(127, 127, 0));
+    }
+
+    #[test]
+    fn render_empty_cell_is_untouched() {
+        let c = Canvas::new(4, 2);
+        let (mut buf, area) = make_buf(4, 3);
+        let before = buf[(0u16, 0u16)].symbol().to_string();
+        c.render(&mut buf, 0, 0, area);
+        assert_eq!(buf[(0u16, 0u16)].symbol(), before);
+    }
+
+    #[test]
+    fn render_with_offset() {
+        let mut c = Canvas::new(2, 1);
+        c.dot(0, 0, 255, 0, 0);
+        let (mut buf, area) = make_buf(10, 10);
+        c.render(&mut buf, 3, 2, area);
+        // Should be at cell (3, 2)
+        assert_eq!(buf[(3u16, 2u16)].symbol(), "⠁");
+        // Origin should be untouched
+        assert_ne!(buf[(0u16, 0u16)].symbol(), "⠁");
+    }
+
+    #[test]
+    fn render_respects_area_bounds() {
+        let mut c = Canvas::new(4, 2);
+        c.dot(0, 0, 255, 0, 0);
+        // Render with area smaller than canvas — offset pushes cell out of bounds
+        let (mut buf, area) = make_buf(2, 2);
+        c.render(&mut buf, 5, 0, area);
+        // No panic, and cell (0,0) is untouched
+        assert_ne!(buf[(0u16, 0u16)].symbol(), "⠁");
     }
 }
