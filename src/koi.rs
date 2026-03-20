@@ -267,7 +267,11 @@ impl Koi {
             let toward = (food.y - self.spine_y[0]).atan2(food.x - self.spine_x[0]);
             let diff = angle_diff(self.heading, toward);
             let dist = dist_sq.sqrt();
-            let gain = if dist > CHASE_GAIN_THRESHOLD { 1.0 } else { 0.5 };
+            let gain = if dist > CHASE_GAIN_THRESHOLD {
+                1.0
+            } else {
+                0.5
+            };
             self.target_turn = (diff * gain).clamp(-1.0, 1.0);
             self.turn_timer = 0.5;
         } else {
@@ -375,7 +379,13 @@ impl Koi {
                     scale,
                 );
                 let a = (1.0 - ft * 0.3) * 0.55;
-                canvas.thick(px, py, (225.0 * a) as u8, (215.0 * a) as u8, (195.0 * a) as u8);
+                canvas.thick(
+                    px,
+                    py,
+                    (225.0 * a) as u8,
+                    (215.0 * a) as u8,
+                    (195.0 * a) as u8,
+                );
             }
         }
     }
@@ -428,7 +438,13 @@ impl Koi {
                 let wy = self.spine_y[idx] + ny * spread + ty * along;
                 let (px, py) = Self::to_px(wx, wy, scale);
                 let a = (1.0 - ft) * 0.5;
-                canvas.thick(px, py, (210.0 * a) as u8, (200.0 * a) as u8, (182.0 * a) as u8);
+                canvas.thick(
+                    px,
+                    py,
+                    (210.0 * a) as u8,
+                    (200.0 * a) as u8,
+                    (182.0 * a) as u8,
+                );
             }
         }
     }
@@ -697,7 +713,10 @@ mod tests {
 
             // Normal should be perpendicular to tangent
             let dot = tx * nx + ty * ny;
-            assert!(dot.abs() < 0.01, "normal should be perpendicular to tangent at {i}");
+            assert!(
+                dot.abs() < 0.01,
+                "normal should be perpendicular to tangent at {i}"
+            );
         }
     }
 }
