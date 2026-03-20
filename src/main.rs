@@ -16,6 +16,7 @@ const TICK: Duration = Duration::from_millis(16); // ~60 fps
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    let debug = std::env::args().any(|a| a == "--debug");
     let mut terminal = ratatui::init();
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
@@ -45,7 +46,11 @@ fn main() -> Result<()> {
             draw_water(buf, area, elapsed);
 
             let cw = area.width as usize;
-            let ch = (area.height as usize).saturating_sub(1);
+            let ch = if debug {
+                (area.height as usize).saturating_sub(1)
+            } else {
+                area.height as usize
+            };
             if cw < 4 || ch < 4 {
                 return;
             }
@@ -56,9 +61,12 @@ fn main() -> Result<()> {
             for k in &pond.fish {
                 k.draw(&mut canvas, elapsed, scale);
             }
-            canvas.render(buf, 0, 1, area);
-
-            draw_header(buf, area, speed);
+            if debug {
+                canvas.render(buf, 0, 1, area);
+                draw_header(buf, area, speed);
+            } else {
+                canvas.render(buf, 0, 0, area);
+            }
         })?;
 
         let timeout = TICK.saturating_sub(last.elapsed());
