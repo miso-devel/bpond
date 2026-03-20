@@ -1,7 +1,11 @@
+mod bubble;
 mod canvas;
 mod food;
 mod koi;
 mod pond;
+mod rain;
+mod ripple;
+mod rng;
 
 use anyhow::Result;
 use canvas::Canvas;
@@ -56,6 +60,9 @@ fn main() -> Result<()> {
             let mut canvas = Canvas::new(cw, ch);
             let scale = pond::compute_scale(tw, th);
 
+            draw_ripples(&pond, &mut canvas, scale);
+            draw_bubbles(&pond, &mut canvas, scale);
+            draw_rain(&pond, &mut canvas, scale);
             draw_food(&pond, &mut canvas, scale);
             for k in &pond.fish {
                 k.draw(&mut canvas, elapsed, scale);
@@ -75,6 +82,11 @@ fn main() -> Result<()> {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Up => speed = (speed + 0.2).min(5.0),
                     KeyCode::Down => speed = (speed - 0.2).max(0.2),
+                    KeyCode::Char('+') | KeyCode::Char('=') => {
+                        pond.add_fish(tw as f64, world_h, elapsed);
+                    }
+                    KeyCode::Char('-') => pond.remove_fish(),
+                    KeyCode::Char('r') | KeyCode::Char('R') => pond.toggle_rain(),
                     _ => {}
                 },
                 Event::Mouse(m) => {
@@ -82,6 +94,11 @@ fn main() -> Result<()> {
                         let scale = pond::compute_scale(tw, th);
                         let (fx, fy) = pond::screen_to_world(m.column, m.row, scale);
                         pond.drop_food(fx, fy);
+                    }
+                    if let MouseEventKind::Down(MouseButton::Right) = m.kind {
+                        let scale = pond::compute_scale(tw, th);
+                        let (fx, fy) = pond::screen_to_world(m.column, m.row, scale);
+                        pond.scare(fx, fy);
                     }
                 }
                 _ => {}
@@ -95,6 +112,11 @@ fn main() -> Result<()> {
 }
 
 fn draw_water(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, elapsed: f64) {
+    let day = (elapsed * 0.03).sin() * 0.5 + 0.5;
+    let base_r = 5.0 + day * 12.0;
+    let base_g = 10.0 + day * 14.0;
+    let base_b = 22.0 + day * 16.0;
+
     for y in 0..area.height {
         for x in 0..area.width {
             let (xf, yf) = (x as f64, y as f64);
@@ -105,13 +127,29 @@ fn draw_water(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, el
             let cell = &mut buf[(x, y)];
             cell.set_char(' ');
             cell.set_bg(Color::Rgb(
-                (10.0 + ripple * 4.0) as u8,
-                (18.0 + ripple * 6.0) as u8,
-                (32.0 + ripple * 9.0) as u8,
+                (base_r + ripple * 4.0) as u8,
+                (base_g + ripple * 6.0) as u8,
+                (base_b + ripple * 9.0) as u8,
             ));
             cell.set_fg(Color::Rgb(10, 18, 32));
         }
     }
+}
+
+fn draw_ripples(pond: &pond::Pond, canvas: &mut Canvas, scale: f64) {
+    for r in &pond.ripples {
+        r.draw(canvas, scale);
+    }
+}
+
+fn draw_bubbles(pond: &pond::Pond, canvas: &mut Canvas, scale: f64) {
+    for b in &pond.bubbles {
+        b.draw(canvas, scale);
+    }
+}
+
+fn draw_rain(pond: &pond::Pond, canvas: &mut Canvas, scale: f64) {
+    pond.rain.draw(canvas, scale);
 }
 
 fn draw_food(pond: &pond::Pond, canvas: &mut Canvas, scale: f64) {
