@@ -85,7 +85,10 @@ mod tests {
         let scale = 2.0;
         // row 0 is the header — saturating_sub clamps to 0
         let (_, wy0) = screen_to_world(0, 0, scale);
-        assert_eq!(wy0, 0.0, "row 0 (header) maps to world y=0 via saturating_sub");
+        assert_eq!(
+            wy0, 0.0,
+            "row 0 (header) maps to world y=0 via saturating_sub"
+        );
 
         let (_, wy1) = screen_to_world(0, 1, scale);
         assert_eq!(wy1, 0.0, "row 1 maps to world y=0");

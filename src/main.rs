@@ -91,11 +91,10 @@ fn draw_water(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, el
     for y in 0..area.height {
         for x in 0..area.width {
             let (xf, yf) = (x as f64, y as f64);
-            let ripple =
-                ((xf * 0.08 + yf * 0.14 + elapsed * 0.2).sin()
-                    * (xf * 0.05 - elapsed * 0.12).cos())
-                    * 0.5
-                    + 0.5;
+            let ripple = ((xf * 0.08 + yf * 0.14 + elapsed * 0.2).sin()
+                * (xf * 0.05 - elapsed * 0.12).cos())
+                * 0.5
+                + 0.5;
             let cell = &mut buf[(x, y)];
             cell.set_char(' ');
             cell.set_bg(Color::Rgb(
@@ -113,7 +112,13 @@ fn draw_food(pond: &pond::Pond, canvas: &mut Canvas, scale: f64) {
         let px = (food.x * scale) as i32;
         let py = (food.y * scale) as i32;
         let fade = food.fade();
-        canvas.fat(px, py, (180.0 * fade) as u8, (120.0 * fade) as u8, (50.0 * fade) as u8);
+        canvas.fat(
+            px,
+            py,
+            (180.0 * fade) as u8,
+            (120.0 * fade) as u8,
+            (50.0 * fade) as u8,
+        );
     }
 }
 
