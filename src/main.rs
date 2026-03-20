@@ -3,8 +3,8 @@ mod food;
 mod koi;
 mod pond;
 
+use anyhow::Result;
 use canvas::Canvas;
-use color_eyre::Result;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
     MouseEventKind,
@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 const TICK: Duration = Duration::from_millis(16); // ~60 fps
 
 fn main() -> Result<()> {
-    color_eyre::install()?;
     let debug = std::env::args().any(|a| a == "--debug");
     let mut terminal = ratatui::init();
 
