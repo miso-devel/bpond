@@ -2,12 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "terminal-zoo (debug)",
+      "name": "bpond (debug)",
       "runtimeExecutable": "cargo",
       "runtimeArgs": ["run"]
     },
     {
-      "name": "terminal-zoo (debug + backtrace)",
+      "name": "bpond (debug + backtrace)",
       "runtimeExecutable": "cargo",
       "runtimeArgs": ["run"],
       "env": {
@@ -15,7 +15,7 @@
       }
     },
     {
-      "name": "terminal-zoo (release)",
+      "name": "bpond (release)",
       "runtimeExecutable": "cargo",
       "runtimeArgs": ["run", "--release"]
     }
