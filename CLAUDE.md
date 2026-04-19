@@ -5,22 +5,27 @@ Procedural koi pond animation in the terminal. Braille sub-pixel rendering + cha
 ## Build & Run
 
 ```bash
-make run          # デバッグビルド → 実行
-make watch        # ファイル変更時に自動リビルド (cargo-watch)
-make debug        # RUST_BACKTRACE=1 付きで実行
-make release      # リリースビルド（最適化あり）
-make run-release  # リリースバイナリ実行
+cargo run                       # デバッグビルド → 実行
+cargo run --release             # リリースビルド → 実行
+cargo run --release -- --debug  # ヘッダー付き（速度情報等）
+cargo watch -x run              # ファイル変更時に自動リビルド
+RUST_BACKTRACE=1 cargo run      # バックトレース付き実行
 ```
 
 ## Development
 
 ```bash
-make check     # コンパイルチェック
-make fmt       # コードフォーマット
-make lint      # clippy リント
-make test      # テスト実行
-make ci        # fmt + lint + check + test
-make clean     # ビルド成果物削除
+cargo check                # コンパイルチェック
+cargo fmt                  # コードフォーマット
+cargo fmt --check          # フォーマット検証のみ（CIと同じ）
+cargo clippy -- -D warnings  # clippy リント（警告もエラー扱い）
+cargo test                 # テスト実行
+cargo clean                # ビルド成果物削除
+```
+
+CI と同等のチェックを手元で回す:
+```bash
+cargo fmt --check && cargo clippy -- -D warnings && cargo test
 ```
 
 ## Architecture
