@@ -162,4 +162,3 @@ fn demo_tape_has_no_terminal_zoo() {
         "demo.tape must not contain \"terminal-zoo\""
     );
 }
-
