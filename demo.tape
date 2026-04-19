@@ -1,7 +1,6 @@
 # VHS tape file for recording bpond demo GIF
 # Usage: vhs demo.tape
 
-Output assets/demo.mp4
 Output assets/demo.gif
 
 Set Shell zsh

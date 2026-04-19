@@ -1,21 +1,16 @@
 <h1 align="center">
   bpond
   <br>
-  <sub>Procedural koi pond in your terminal</sub>
+  <sub>Koi, alive in your terminal</sub>
 </h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/lang-Rust-orange?logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/TUI-ratatui-blue" alt="ratatui">
-  <img src="https://img.shields.io/badge/rendering-braille-purple" alt="braille">
 </p>
 
 <p align="center">
-  <a href="./assets/demo.mp4">
-    <img src="./assets/demo.gif" alt="demo" width="600">
-  </a>
-  <br>
-  <sub><a href="./assets/demo.mp4">▶ Higher-quality MP4</a></sub>
+  <img src="./assets/demo.gif" alt="demo" width="600">
 </p>
 
 ---
