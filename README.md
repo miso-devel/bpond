@@ -11,7 +11,11 @@
 </p>
 
 <p align="center">
-  <img src="./assets/demo.gif" alt="demo" width="600">
+  <a href="./assets/demo.mp4">
+    <img src="./assets/demo.gif" alt="demo" width="600">
+  </a>
+  <br>
+  <sub><a href="./assets/demo.mp4">▶ Higher-quality MP4</a></sub>
 </p>
 
 ---
@@ -32,6 +36,7 @@ cargo run --release -- --debug
 |:---:|--------|
 | Left click | Drop food |
 | Right click | Scare nearby koi |
+| `f` | Drop food at a random spot |
 | `+` / `=` | Add a koi |
 | `-` | Remove a koi |
 | `r` | Toggle rain |
