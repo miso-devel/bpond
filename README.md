@@ -32,6 +32,7 @@ cargo run --release -- --debug
 |:---:|--------|
 | Left click | Drop food |
 | Right click | Scare nearby koi |
+| `f` | Drop food at a random spot |
 | `+` / `=` | Add a koi |
 | `-` | Remove a koi |
 | `r` | Toggle rain |

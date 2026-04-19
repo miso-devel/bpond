@@ -87,6 +87,11 @@ fn main() -> Result<()> {
                     }
                     KeyCode::Char('-') => pond.remove_fish(),
                     KeyCode::Char('r') | KeyCode::Char('R') => pond.toggle_rain(),
+                    KeyCode::Char('f') | KeyCode::Char('F') => {
+                        let fx = (0.1 + rng::pseudo_rand(elapsed) * 0.8) * tw as f64;
+                        let fy = (0.2 + rng::pseudo_rand(elapsed + 7.3) * 0.7) * world_h;
+                        pond.drop_food(fx, fy);
+                    }
                     _ => {}
                 },
                 Event::Mouse(m) => {
@@ -172,7 +177,7 @@ fn draw_header(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, s
         return;
     }
     let hdr = format!(
-        "  bpond  Koi Pond  speed:{:.1}x  \u{2191}\u{2193}:speed  q:quit",
+        "  bpond  Koi Pond  speed:{:.1}x  \u{2191}\u{2193}:speed  f:feed  q:quit",
         speed
     );
     for (i, ch) in hdr.chars().enumerate() {
