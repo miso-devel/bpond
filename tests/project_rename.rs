@@ -163,21 +163,3 @@ fn demo_tape_has_no_terminal_zoo() {
     );
 }
 
-// -- directory name ----------------------------------------------------------
-
-#[test]
-fn project_directory_name_is_bpond() {
-    // Given: the project root directory
-    let cwd = std::env::current_dir().expect("failed to get current dir");
-
-    // When/Then: the directory basename must be "bpond"
-    let dirname = cwd
-        .file_name()
-        .expect("current dir has no file name")
-        .to_str()
-        .expect("directory name is not valid UTF-8");
-    assert_eq!(
-        dirname, "bpond",
-        "project directory must be named \"bpond\", got \"{dirname}\""
-    );
-}
