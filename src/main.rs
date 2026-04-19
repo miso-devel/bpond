@@ -172,7 +172,7 @@ fn draw_header(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, s
         return;
     }
     let hdr = format!(
-        "  mini-pond  Koi Pond  speed:{:.1}x  \u{2191}\u{2193}:speed  q:quit",
+        "  bpond  Koi Pond  speed:{:.1}x  \u{2191}\u{2193}:speed  q:quit",
         speed
     );
     for (i, ch) in hdr.chars().enumerate() {

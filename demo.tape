@@ -1,4 +1,4 @@
-# VHS tape file for recording terminal-zoo demo GIF
+# VHS tape file for recording bpond demo GIF
 # Usage: vhs demo.tape
 
 Output assets/demo.gif

@@ -2,7 +2,7 @@
 
 # Default: build and run
 run: build
-	./target/debug/mini-pond
+	./target/debug/bpond
 
 # Debug build
 build:
@@ -18,7 +18,7 @@ release:
 
 # Run release binary
 run-release: release
-	./target/release/mini-pond
+	./target/release/bpond
 
 # Check compilation without building
 check:
