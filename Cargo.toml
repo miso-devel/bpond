@@ -3,6 +3,12 @@ name = "bpond"
 version = "0.3.0"
 edition = "2021"
 description = "Procedural koi pond in your terminal — chain-dynamics spine, braille sub-pixel rendering"
+license = "MIT"
+repository = "https://github.com/miso-devel/bpond"
+homepage = "https://github.com/miso-devel/bpond"
+readme = "README.md"
+keywords = ["terminal", "tui", "animation", "ratatui", "braille"]
+categories = ["command-line-utilities", "visualization"]
 
 [dependencies]
 ratatui = "0.29"
