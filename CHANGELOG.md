@@ -5,32 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-04-23
 
-### Added
-- MIT `LICENSE` file at the repo root.
-- Package metadata in `Cargo.toml` (`license`, `repository`, `homepage`, `readme`, `keywords`, `categories`).
-- `rust-toolchain.toml` pinning the toolchain to `stable` with `rustfmt` and `clippy`.
-
-### Changed
-- Migrated `src/koi/mod.rs` to `src/koi.rs` (2018 edition module layout).
-
-### Removed
-- `Makefile` — use `cargo` directly (`cargo run`, `cargo test`, `cargo clippy -- -D warnings`, etc.).
-
-## [0.3.0] — 2026-04-15
+First release published to crates.io.
 
 ### Added
 - Rain mode (`r` key) with raindrop ripples on the water surface.
 - Bubble particles rising from the pond floor.
 - Right-click to scare nearby koi (they dart away).
 - Add/remove koi with `+` / `-`.
+- `f` to drop food at a random position (no mouse required).
 - `--debug` flag shows a header with runtime info; hidden by default.
+- MIT `LICENSE` file at the repo root.
+- Package metadata in `Cargo.toml` (`license`, `repository`, `homepage`, `readme`,
+  `keywords`, `categories`, `authors`, `rust-version`, `exclude`).
+- `rust-toolchain.toml` pinning the toolchain to `stable` with `rustfmt` and `clippy`.
+- Release workflow (`.github/workflows/release.yml`) that publishes to crates.io
+  and creates a GitHub Release on tag push.
+- `CONTRIBUTING.md` with branching, commit, and release conventions.
 
 ### Changed
 - Renamed project from `mini-pond` to `bpond`.
 - Replaced `color-eyre` with `anyhow` for simpler error handling.
 - Extracted `Food` and `Pond` into their own modules; split `Koi` responsibilities.
+- Migrated `src/koi/mod.rs` to `src/koi.rs` (2018 edition module layout).
+- Updated tagline to "Koi, alive in your terminal" in the README header and
+  crate description.
+- Slimmed the README: dropped the MP4 artifact link and the braille rendering badge.
+
+### Removed
+- `Makefile` — use `cargo` directly (`cargo run`, `cargo test`,
+  `cargo clippy -- -D warnings`, etc.).
+- `demo.tape` and tracked `.claude/launch.json` — personal dev artifacts
+  that do not belong in the public repo.
 
 ## [0.2.0]
 
