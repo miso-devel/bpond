@@ -55,6 +55,19 @@ src/
 ## Key Bindings
 
 - マウスクリック — 餌を落とす（鯉が寄ってきて食べる）
+- `f` — ランダム位置に餌を落とす（マウス不要）
 - `↑` / `↓` — 速度調整
 - `q` / `Esc` — 終了
 - `--debug` フラグ — ヘッダー表示（速度情報等）
+
+## Releasing
+
+crates.io 公開は tag push で自動化されています。
+
+1. `Cargo.toml` の `version` を更新
+2. `CHANGELOG.md` に新バージョンのエントリを追加
+3. コミット & push
+4. `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. `.github/workflows/release.yml` が `cargo publish` と GitHub Release を実行
+
+前提: repo secrets に `CARGO_REGISTRY_TOKEN` が設定されていること（crates.io の Account Settings → API Tokens で発行）。
