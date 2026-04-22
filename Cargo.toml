@@ -13,11 +13,8 @@ keywords = ["terminal", "tui", "animation", "ratatui", "braille"]
 categories = ["command-line-utilities", "visualization"]
 exclude = [
     "assets/*",
-    "demo.tape",
     "CLAUDE.md",
     ".github/",
-    ".takt/",
-    ".claude/",
     ".editorconfig",
 ]
 
