@@ -5,8 +5,9 @@
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/lang-Rust-orange?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/TUI-ratatui-blue" alt="ratatui">
+  <a href="https://crates.io/crates/bpond"><img src="https://img.shields.io/crates/v/bpond.svg?logo=rust" alt="crates.io"></a>
+  <a href="https://docs.rs/bpond"><img src="https://img.shields.io/docsrs/bpond" alt="docs.rs"></a>
+  <a href="https://github.com/miso-devel/bpond/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/bpond.svg" alt="license"></a>
 </p>
 
 <p align="center">
@@ -17,12 +18,27 @@
 
 Koi fish swim with chain-dynamics physics. Click to drop food — they'll chase it. No keyframes, no pre-baked frames. Everything is procedural.
 
-## Install & Run
+## Install
 
 ```bash
+cargo install bpond
+```
+
+Requires Rust 1.80 or later. The installed binary lands in `~/.cargo/bin/`, so make sure that directory is on your `PATH`.
+
+## Run
+
+```bash
+bpond                # standard mode
+bpond --debug        # show a header with speed / runtime info
+```
+
+### From source
+
+```bash
+git clone https://github.com/miso-devel/bpond
+cd bpond
 cargo run --release
-# or with debug overlay
-cargo run --release -- --debug
 ```
 
 ## Controls
