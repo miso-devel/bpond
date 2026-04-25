@@ -116,15 +116,28 @@ impl Pond {
     }
 }
 
-/// Visible world height accounting for header row and braille aspect ratio.
+/// Visual zoom factor. Higher = pond looks more spacious, koi appear smaller.
+/// Pushing past ~3.0 makes koi bodies fewer than 8 sub-pixels long and they
+/// stop rendering legibly, so the practical ceiling lives here as a constant.
+pub const ZOOM: f64 = 1.6;
+
+/// Visible world width accounting for the visual zoom factor.
+pub fn world_width(tw: u16) -> f64 {
+    tw as f64 * ZOOM
+}
+
+/// Visible world height accounting for header row, braille aspect ratio, and zoom.
 pub fn world_height(th: u16) -> f64 {
-    (th.saturating_sub(1) as f64) * 2.0
+    (th.saturating_sub(1) as f64) * 2.0 * ZOOM
 }
 
 /// Uniform scale factor from world coordinates to canvas sub-pixels.
+/// Multiplying by `ZOOM` on the world side and dividing here keeps the world
+/// filling the canvas exactly while shrinking everything visually.
 pub fn compute_scale(_tw: u16, th: u16) -> f64 {
     let ch = th.saturating_sub(1) as f64;
-    (ch * 4.0 / th as f64).min(2.0)
+    let raw = ch * 4.0 / th as f64;
+    (raw / ZOOM).min(2.0 / ZOOM)
 }
 
 /// Convert screen (terminal cell) coordinates to world coordinates.
@@ -141,14 +154,18 @@ mod tests {
 
     #[test]
     fn world_height_accounts_for_header() {
-        assert_eq!(world_height(24), 46.0);
+        assert_eq!(world_height(24), 23.0 * 2.0 * ZOOM);
         assert_eq!(world_height(1), 0.0);
     }
 
     #[test]
     fn compute_scale_typical_terminal() {
         let scale = compute_scale(80, 24);
-        assert!((scale - 2.0).abs() < 0.01);
+        let expected = 2.0 / ZOOM;
+        assert!(
+            (scale - expected).abs() < 0.01,
+            "scale should be 2.0/ZOOM = {expected}, got {scale}"
+        );
     }
 
     #[test]
@@ -409,12 +426,14 @@ mod new_feature_tests {
     }
 
     #[test]
-    fn compute_scale_caps_at_two() {
-        // For large terminals the scale should be capped at 2.0.
+    fn compute_scale_caps_at_max() {
+        // For large terminals the scale should be capped at 2.0/ZOOM,
+        // which is the value that keeps the world filling the canvas exactly.
         let scale = super::compute_scale(200, 100);
+        let expected = 2.0 / ZOOM;
         assert!(
-            (scale - 2.0).abs() < 0.01,
-            "scale should cap at 2.0, got {scale}"
+            (scale - expected).abs() < 0.01,
+            "scale should cap at 2.0/ZOOM = {expected}, got {scale}"
         );
     }
 

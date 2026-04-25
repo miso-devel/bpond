@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     let mut terminal = ratatui::init();
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
-    let (w, h) = (tw as f64, pond::world_height(th));
+    let (w, h) = (pond::world_width(tw), pond::world_height(th));
     let mut pond = pond::Pond::new(w, h);
 
     crossterm::execute!(std::io::stdout(), EnableMouseCapture)?;
@@ -38,9 +38,10 @@ fn main() -> Result<()> {
         last = Instant::now();
 
         let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
+        let world_w = pond::world_width(tw);
         let world_h = pond::world_height(th);
 
-        pond.update(dt, elapsed, tw as f64, world_h);
+        pond.update(dt, elapsed, world_w, world_h);
 
         terminal.draw(|f| {
             let area = f.area();
@@ -83,12 +84,12 @@ fn main() -> Result<()> {
                     KeyCode::Up => speed = (speed + 0.2).min(5.0),
                     KeyCode::Down => speed = (speed - 0.2).max(0.2),
                     KeyCode::Char('+') | KeyCode::Char('=') => {
-                        pond.add_fish(tw as f64, world_h, elapsed);
+                        pond.add_fish(world_w, world_h, elapsed);
                     }
                     KeyCode::Char('-') => pond.remove_fish(),
                     KeyCode::Char('r') | KeyCode::Char('R') => pond.toggle_rain(),
                     KeyCode::Char('f') | KeyCode::Char('F') => {
-                        let fx = (0.1 + rng::pseudo_rand(elapsed) * 0.8) * tw as f64;
+                        let fx = (0.1 + rng::pseudo_rand(elapsed) * 0.8) * world_w;
                         let fy = (0.2 + rng::pseudo_rand(elapsed + 7.3) * 0.7) * world_h;
                         pond.drop_food(fx, fy);
                     }
