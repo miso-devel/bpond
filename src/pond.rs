@@ -117,9 +117,10 @@ impl Pond {
 }
 
 /// Visual zoom factor. Higher = pond looks more spacious, koi appear smaller.
-/// Pushing past ~3.0 makes koi bodies fewer than 8 sub-pixels long and they
-/// stop rendering legibly, so the practical ceiling lives here as a constant.
-pub const ZOOM: f64 = 1.6;
+/// At `ZOOM = 5.0` a koi body is ~9 sub-pixels long (about 4–5 terminal
+/// cells); pushing much beyond this makes the body collapse into a smear,
+/// so the practical ceiling lives here as a compile-time constant.
+pub const ZOOM: f64 = 5.0;
 
 /// Visible world width accounting for the visual zoom factor.
 pub fn world_width(tw: u16) -> f64 {
