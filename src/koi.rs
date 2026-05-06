@@ -21,18 +21,26 @@ pub(super) const BODY_TOTAL: f64 = N_SPINE as f64 * SEG_LEN;
 // ---------------------------------------------------------------------------
 
 pub(super) const EATING_RANGE_SQ: f64 = 6.0;
-pub(super) const CHASE_GAIN_THRESHOLD: f64 = 12.0;
+/// Distance below which the koi softens its turn-rate gain to avoid
+/// orbiting around the food. Smaller = full gain holds longer = more
+/// direct chase paths.
+pub(super) const CHASE_GAIN_THRESHOLD: f64 = 6.0;
 pub(super) const CHASE_DECEL_DIST: f64 = 15.0;
 
 // ---------------------------------------------------------------------------
 // Steering
 // ---------------------------------------------------------------------------
 
-pub(super) const MAX_TURN_CHASE: f64 = 1.0;
+/// Real koi snap toward food with sharp pectoral-fin turns, so chasing
+/// allows much higher angular velocity than idle wandering.
+pub(super) const MAX_TURN_CHASE: f64 = 2.5;
 pub(super) const MAX_TURN_DEFAULT: f64 = 0.6;
 
 pub(super) const APPROACH_RATE_EATING: f64 = 2.0;
-pub(super) const APPROACH_RATE_CHASE: f64 = 4.0;
+/// Near-instant tracking while chasing — the koi commits to its target
+/// heading right away rather than ramping toward it over a fraction of a
+/// second (which produced visible "wide loops" around food).
+pub(super) const APPROACH_RATE_CHASE: f64 = 12.0;
 pub(super) const APPROACH_RATE_IDLE: f64 = 0.6;
 
 // ---------------------------------------------------------------------------
@@ -41,11 +49,63 @@ pub(super) const APPROACH_RATE_IDLE: f64 = 0.6;
 
 pub(super) const BURST_EATING_BASE: f64 = 0.2;
 pub(super) const BURST_EATING_PECK: f64 = 0.25;
-pub(super) const BURST_CHASE_MAX: f64 = 2.2;
+/// Forward speed multiplier while chasing food. Lowered from 2.2 so the
+/// koi doesn't drift past the food during a turn.
+pub(super) const BURST_CHASE_MAX: f64 = 1.5;
 pub(super) const BURST_RANDOM_SPRINT: f64 = 1.5;
 pub(super) const BURST_SCARE: f64 = 2.5;
 
 pub(super) const OFF_SCREEN_MARGIN: f64 = 5.0;
+
+// ---------------------------------------------------------------------------
+// Body wave — traveling curvature down the spine (head→tail)
+// ---------------------------------------------------------------------------
+
+/// Per-segment angular oscillation amplitude (radians at the tail peak).
+/// Real koi cruise with subtle undulation; too much wave makes the head
+/// path look jittery, so this is tuned conservatively.
+pub(super) const BODY_WAVE_AMP: f64 = 0.06;
+/// How many spatial wavelengths fit in the body (~1 full wave).
+pub(super) const BODY_WAVELENGTH: f64 = 1.05;
+/// Slow modulation that mimics breathing / variable thrust.
+pub(super) const BREATH_FREQ: f64 = 0.55;
+pub(super) const BREATH_AMP: f64 = 0.20;
+
+// ---------------------------------------------------------------------------
+// Idle micro-motion + glide-and-pause cruising
+// ---------------------------------------------------------------------------
+
+pub(super) const IDLE_SPEED_AMP: f64 = 0.18;
+pub(super) const IDLE_SPEED_FREQ: f64 = 0.4;
+/// When the lazy phase is below this, the koi briefly hovers — real koi
+/// alternate between drift and near-still rather than constant cruising.
+pub(super) const PAUSE_THRESHOLD: f64 = -0.55;
+pub(super) const PAUSE_BURST: f64 = 0.25;
+
+// ---------------------------------------------------------------------------
+// Integration
+// ---------------------------------------------------------------------------
+
+/// Sub-steps per `update()` call — splits the frame for smoother dynamics.
+pub(super) const SUBSTEPS: usize = 3;
+
+// ---------------------------------------------------------------------------
+// Schooling (Boids-style) — koi prefer to swim near other koi
+// ---------------------------------------------------------------------------
+
+/// Radius (world units) within which another koi influences this one.
+pub(super) const NEIGHBOR_RADIUS: f64 = 14.0;
+/// Below this distance the separation force kicks in to avoid collisions.
+pub(super) const SEPARATION_RADIUS: f64 = 5.0;
+/// Per-axis weights for the three Boids forces. Tuned soft so schooling
+/// shapes the path without overpowering food chasing or scare flight.
+pub(super) const W_SEPARATION: f64 = 0.40;
+pub(super) const W_ALIGNMENT: f64 = 0.10;
+pub(super) const W_COHESION: f64 = 0.06;
+/// Curiosity: when a neighbor heads toward food, this koi nudges its
+/// own target toward the same food — the "follow the leader" reaction
+/// that real koi show during a feeding event.
+pub(super) const W_CURIOSITY: f64 = 0.30;
 
 // ---------------------------------------------------------------------------
 // Koi
@@ -65,6 +125,9 @@ pub struct Koi {
     pub scare_timer: f64,
     pub(super) scare_from_x: f64,
     pub(super) scare_from_y: f64,
+    /// Most recent thrust multiplier (1.0 = cruise). Drawing reads this to
+    /// scale fin/tail amplitude proportionally to current effort.
+    pub(super) burst: f64,
 }
 
 impl Koi {
@@ -82,6 +145,7 @@ impl Koi {
             scare_timer: 0.0,
             scare_from_x: 0.0,
             scare_from_y: 0.0,
+            burst: 1.0,
         };
         koi.init_spine(x, y);
         koi.init_red_patches();
@@ -90,6 +154,13 @@ impl Koi {
 
     pub fn head(&self) -> (f64, f64) {
         (self.spine_x[0], self.spine_y[0])
+    }
+
+    /// Position + heading snapshot. Pond collects one per koi each frame
+    /// so each koi can react to its neighbors without aliasing the mutable
+    /// borrow during update.
+    pub fn snapshot(&self) -> (f64, f64, f64) {
+        (self.spine_x[0], self.spine_y[0], self.heading)
     }
 
     pub fn scare(&mut self, x: f64, y: f64) {
@@ -232,24 +303,41 @@ mod tests {
         assert!(n_red < N_SPINE, "not all segments should be red");
     }
 
-    // -- propagate_chain ----------------------------------------------------
+    // -- animate_body / body wave -------------------------------------------
 
     #[test]
-    fn propagate_chain_maintains_max_distance() {
+    fn animate_body_preserves_segment_length() {
+        // After the traveling-wave step every consecutive pair must be
+        // exactly SEG_LEN apart — the wave rotates segments, never stretches.
         let mut koi = Koi::new(50.0, 30.0, 0.0, 5.0, 1.0);
         koi.spine_x[0] = 100.0;
         koi.spine_y[0] = 100.0;
-        koi.propagate_chain();
-
+        koi.animate_body(2.5);
         for i in 1..N_SPINE {
             let dx = koi.spine_x[i] - koi.spine_x[i - 1];
             let dy = koi.spine_y[i] - koi.spine_y[i - 1];
             let dist = (dx * dx + dy * dy).sqrt();
             assert!(
-                dist <= SEG_LEN + 1e-10,
-                "segment {i} distance {dist} exceeds SEG_LEN {SEG_LEN}"
+                (dist - SEG_LEN).abs() < 1e-9,
+                "segment {i} dist {dist} should equal SEG_LEN {SEG_LEN}"
             );
         }
+    }
+
+    #[test]
+    fn animate_body_phase_advances_with_time() {
+        // Two snapshots at different phases must differ — the wave is alive.
+        let mut a = Koi::new(50.0, 30.0, 0.0, 5.0, 1.0);
+        let mut b = Koi::new(50.0, 30.0, 0.0, 5.0, 1.0);
+        a.animate_body(0.0);
+        b.animate_body(0.3);
+        let diff: f64 = a
+            .spine_y
+            .iter()
+            .zip(b.spine_y.iter())
+            .map(|(x, y)| (x - y).abs())
+            .sum();
+        assert!(diff > 0.005, "phase shift must change spine shape");
     }
 
     // -- nearest_food -------------------------------------------------------
@@ -282,7 +370,7 @@ mod tests {
 
         let heading_before = koi.heading;
         for _ in 0..60 {
-            koi.update(0.016, 0.0, 100.0, 100.0, &foods);
+            koi.update(0.016, 0.0, 100.0, 100.0, &foods, &[], 0);
         }
         let heading_after = koi.heading;
 
@@ -420,7 +508,7 @@ mod scare_tests {
 
         let foods: Vec<Food> = Vec::new();
         for _ in 0..30 {
-            koi.update(0.016, 0.0, 200.0, 100.0, &foods);
+            koi.update(0.016, 0.0, 200.0, 100.0, &foods, &[], 0);
         }
 
         let (x_after, _) = koi.head();
@@ -443,8 +531,8 @@ mod scare_tests {
         let (sx0, sy0) = scared.head();
 
         for _ in 0..20 {
-            calm.update(dt, 0.0, 200.0, 100.0, &foods);
-            scared.update(dt, 0.0, 200.0, 100.0, &foods);
+            calm.update(dt, 0.0, 200.0, 100.0, &foods, &[], 0);
+            scared.update(dt, 0.0, 200.0, 100.0, &foods, &[], 0);
         }
 
         let (cx1, cy1) = calm.head();
@@ -464,18 +552,20 @@ mod scare_tests {
     fn steer_idle_turn_timer_never_goes_negative() {
         // Regression: steer_idle used fract() (signed) instead of fract().abs().
         // When s2 < 0, turn_timer was set to 2.0 + s2*5.0 which could be as low
-        // as -3.0, causing steer_idle to re-roll every frame (timer always expired).
-        // After fix: s2 = fract().abs() ∈ [0,1) → turn_timer ∈ [2.0, 7.0).
+        // as -3.0. After fix: s2 = fract().abs() ∈ [0,1) → reset to [2.0, 7.0).
+        // The remaining substeps within the same update() then shave off
+        // ~2·sub_dt, so the lower bound here is 2.0 - dt — still nowhere near
+        // the old -3.
         let mut koi = Koi::new(50.0, 30.0, 0.0, 5.0, 3.7);
         let foods: Vec<Food> = Vec::new();
+        let dt = 0.016;
         for i in 0..500 {
-            koi.turn_timer = 0.0; // force steer_idle to fire this frame
-            let t = i as f64 * 0.1; // sweep across positive and negative sin/cos regions
-            koi.update(0.016, t, 200.0, 100.0, &foods);
-            // steer_idle sets turn_timer = 2.0 + s2.abs()*5.0 ∈ [2.0, 7.0)
+            koi.turn_timer = 0.0;
+            let t = i as f64 * 0.1;
+            koi.update(dt, t, 200.0, 100.0, &foods, &[], 0);
             assert!(
-                koi.turn_timer >= 2.0,
-                "turn_timer should be >= 2.0 after steer_idle reset at t={t:.1}, got {}",
+                koi.turn_timer >= 2.0 - dt,
+                "turn_timer should not crash negative at t={t:.1}, got {}",
                 koi.turn_timer
             );
         }
@@ -492,7 +582,7 @@ mod scare_tests {
         for i in 0..500 {
             koi.turn_timer = 0.0;
             let t = i as f64 * 0.1;
-            koi.update(0.016, t, 200.0, 100.0, &foods);
+            koi.update(0.016, t, 200.0, 100.0, &foods, &[], 0);
             if koi.target_turn > 0.0 {
                 positive_turns += 1;
             }
@@ -513,7 +603,7 @@ mod scare_tests {
 
         let foods: Vec<Food> = Vec::new();
         for _ in 0..625 {
-            koi.update(0.016, 0.0, 200.0, 100.0, &foods);
+            koi.update(0.016, 0.0, 200.0, 100.0, &foods, &[], 0);
         }
         assert!(
             koi.scare_timer <= 0.0,
