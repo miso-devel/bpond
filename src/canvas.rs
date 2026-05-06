@@ -51,15 +51,6 @@ impl Canvas {
         }
     }
 
-    /// 3×3 sub-pixel block.
-    pub fn thick(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8) {
-        for dy in -1..=1 {
-            for dx in -1..=1 {
-                self.dot(x + dx, y + dy, r, g, b);
-            }
-        }
-    }
-
     /// Check whether a sub-pixel is set (for testing).
     #[cfg(test)]
     pub fn get(&self, x: usize, y: usize) -> (bool, u8, u8, u8) {
@@ -162,24 +153,6 @@ mod tests {
         assert!(c.get(5, 5).0);
         assert!(!c.get(3, 4).0);
         assert!(!c.get(6, 4).0);
-    }
-
-    #[test]
-    fn thick_sets_3x3_block() {
-        let mut c = Canvas::new(10, 5);
-        c.thick(5, 5, 100, 100, 100);
-        for dy in -1..=1i32 {
-            for dx in -1..=1i32 {
-                assert!(
-                    c.get((5 + dx) as usize, (5 + dy) as usize).0,
-                    "pixel at ({}, {}) should be set",
-                    5 + dx,
-                    5 + dy
-                );
-            }
-        }
-        assert!(!c.get(3, 5).0);
-        assert!(!c.get(7, 5).0);
     }
 
     // -- render: braille encoding -------------------------------------------

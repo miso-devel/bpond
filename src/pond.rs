@@ -52,8 +52,12 @@ impl Pond {
             }
             foods.retain(|f| f.is_alive());
 
-            for k in fish.iter_mut() {
-                k.update(dt, t, w, h, foods);
+            // Pre-collect each koi's position+heading so each can react
+            // to its neighbors during this frame without aliasing the
+            // mutable iter_mut borrow.
+            let snapshots: Vec<(f64, f64, f64)> = fish.iter().map(|k| k.snapshot()).collect();
+            for (i, k) in fish.iter_mut().enumerate() {
+                k.update(dt, t, w, h, foods, &snapshots, i);
             }
         }
 

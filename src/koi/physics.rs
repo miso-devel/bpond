@@ -100,20 +100,146 @@ impl Koi {
         }
     }
 
-    pub(super) fn propagate_chain(&mut self) {
+    /// Apply a head→tail traveling curvature wave along the spine, snapping
+    /// each segment to exactly `SEG_LEN` from its predecessor. The amplitude
+    /// grows toward the tail and is modulated by a slow "breath" oscillation
+    /// plus current thrust — a faster fish bends more.
+    pub(super) fn animate_body(&mut self, t: f64) {
+        let breath = 1.0 + BREATH_AMP * (t * BREATH_FREQ + self.id).sin();
+        let thrust = 0.6 + 0.4 * self.burst.clamp(0.2, 2.5);
         for i in 1..N_SPINE {
-            let dx = self.spine_x[i - 1] - self.spine_x[i];
-            let dy = self.spine_y[i - 1] - self.spine_y[i];
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > SEG_LEN {
-                let ratio = SEG_LEN / dist;
-                self.spine_x[i] = self.spine_x[i - 1] - dx * ratio;
-                self.spine_y[i] = self.spine_y[i - 1] - dy * ratio;
-            }
+            let dx = self.spine_x[i] - self.spine_x[i - 1];
+            let dy = self.spine_y[i] - self.spine_y[i - 1];
+            let cur_angle = dy.atan2(dx);
+
+            let s = i as f64 / N_SPINE as f64;
+            // shape(s): zero at head, peak just past mid-body, taper at tip.
+            let shape = (s.powf(1.4) * (1.0 - 0.25 * s)).max(0.0);
+            let amp = BODY_WAVE_AMP * shape * breath * thrust;
+            let phase = 2.0 * PI * FREQ * t - 2.0 * PI * s * BODY_WAVELENGTH + self.id;
+            let new_angle = cur_angle + amp * phase.sin();
+
+            self.spine_x[i] = self.spine_x[i - 1] + new_angle.cos() * SEG_LEN;
+            self.spine_y[i] = self.spine_y[i - 1] + new_angle.sin() * SEG_LEN;
         }
     }
 
-    pub fn update(&mut self, dt: f64, t: f64, w: f64, h: f64, foods: &[Food]) {
+    /// Boids-style schooling delta-heading. Three forces (separation,
+    /// alignment, cohesion) are summed with conservative weights so the
+    /// koi school feels coherent without overpowering food chasing or
+    /// scare flight. `others` is `(x, y, heading)` for every other koi
+    /// in the pond, including this one (skipped via `my_idx`).
+    fn schooling_delta(&self, others: &[(f64, f64, f64)], my_idx: usize) -> f64 {
+        let (hx, hy) = (self.spine_x[0], self.spine_y[0]);
+        let (mut sep_x, mut sep_y) = (0.0, 0.0);
+        let mut sep_n = 0;
+        let mut align_h = 0.0;
+        let mut align_n = 0;
+        let (mut coh_x, mut coh_y) = (0.0, 0.0);
+        let mut coh_n = 0;
+
+        for (i, &(ox, oy, oh)) in others.iter().enumerate() {
+            if i == my_idx {
+                continue;
+            }
+            let dx = ox - hx;
+            let dy = oy - hy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if !(0.001..=NEIGHBOR_RADIUS).contains(&dist) {
+                continue;
+            }
+            if dist < SEPARATION_RADIUS {
+                sep_x -= dx / dist;
+                sep_y -= dy / dist;
+                sep_n += 1;
+            }
+            align_h += oh;
+            align_n += 1;
+            coh_x += ox;
+            coh_y += oy;
+            coh_n += 1;
+        }
+
+        let mut delta = 0.0;
+        if sep_n > 0 {
+            let target = sep_y.atan2(sep_x);
+            delta += angle_diff(self.heading, target) * W_SEPARATION;
+        }
+        if align_n > 0 {
+            let avg = align_h / align_n as f64;
+            delta += angle_diff(self.heading, avg) * W_ALIGNMENT;
+        }
+        if coh_n > 0 {
+            let cx = coh_x / coh_n as f64;
+            let cy = coh_y / coh_n as f64;
+            let target = (cy - hy).atan2(cx - hx);
+            delta += angle_diff(self.heading, target) * W_COHESION;
+        }
+        delta.clamp(-0.6, 0.6)
+    }
+
+    /// Curiosity: if any in-range neighbor is heading toward the same food
+    /// I'd see, nudge my target toward that food too. Produces the
+    /// "follow-the-leader" reaction when one koi breaks for food.
+    fn curiosity_delta(
+        &self,
+        nearest_food: Option<&NearestFood>,
+        others: &[(f64, f64, f64)],
+        my_idx: usize,
+    ) -> f64 {
+        let food = match nearest_food {
+            Some(f) if f.dist_sq < (NEIGHBOR_RADIUS * 2.5).powi(2) => f,
+            _ => return 0.0,
+        };
+        let (hx, hy) = (self.spine_x[0], self.spine_y[0]);
+        let toward_food = (food.y - hy).atan2(food.x - hx);
+        for (i, &(ox, oy, oh)) in others.iter().enumerate() {
+            if i == my_idx {
+                continue;
+            }
+            let dx = ox - hx;
+            let dy = oy - hy;
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq > NEIGHBOR_RADIUS * NEIGHBOR_RADIUS {
+                continue;
+            }
+            let n_to_food = (food.y - oy).atan2(food.x - ox);
+            if angle_diff(oh, n_to_food).abs() < 0.5 {
+                return angle_diff(self.heading, toward_food) * W_CURIOSITY;
+            }
+        }
+        0.0
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update(
+        &mut self,
+        dt: f64,
+        t: f64,
+        w: f64,
+        h: f64,
+        foods: &[Food],
+        others: &[(f64, f64, f64)],
+        my_idx: usize,
+    ) {
+        let sub_dt = dt / SUBSTEPS as f64;
+        for s in 0..SUBSTEPS {
+            let sub_t = t - dt + sub_dt * (s as f64 + 1.0);
+            self.step(sub_dt, sub_t, w, h, foods, others, my_idx);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn step(
+        &mut self,
+        dt: f64,
+        t: f64,
+        w: f64,
+        h: f64,
+        foods: &[Food],
+        others: &[(f64, f64, f64)],
+        my_idx: usize,
+    ) {
         let nearest = self.nearest_food(foods);
         let dist_sq = nearest.as_ref().map(|f| f.dist_sq).unwrap_or(f64::MAX);
         let eating = dist_sq < EATING_RANGE_SQ;
@@ -128,7 +254,9 @@ impl Koi {
         } else if eating {
             let food = nearest.as_ref().unwrap();
             let toward = (food.y - self.spine_y[0]).atan2(food.x - self.spine_x[0]);
-            let orbit = (t * 0.7 + self.id * 2.3).sin() * 0.9;
+            // Minimal orbit — just a tiny wiggle while pecking, not a wide
+            // arc around the food.
+            let orbit = (t * 0.7 + self.id * 2.3).sin() * 0.15;
             self.target_turn = angle_diff(self.heading, toward + orbit).clamp(-0.6, 0.6);
             self.turn_timer = 0.5;
         } else if chasing {
@@ -140,10 +268,14 @@ impl Koi {
             } else {
                 0.5
             };
-            self.target_turn = (diff * gain).clamp(-1.0, 1.0);
+            self.target_turn = (diff * gain).clamp(-MAX_TURN_CHASE, MAX_TURN_CHASE);
             self.turn_timer = 0.5;
         } else {
             self.steer_idle(dt, t);
+            // Schooling and curiosity only modulate idle wandering — not
+            // food chasing, not scare flight (those override behavior).
+            self.target_turn += self.schooling_delta(others, my_idx);
+            self.target_turn += self.curiosity_delta(nearest.as_ref(), others, my_idx);
         }
 
         // --- smooth turn rate ---
@@ -156,8 +288,10 @@ impl Koi {
         };
         self.apply_turn(dt, approach_rate, max_turn);
 
-        // --- swimming undulation ---
-        let swim_wave = (t * 2.0 * PI * FREQ).sin() * 0.10;
+        // --- swimming undulation: small head yaw atop the body wave ---
+        // The body wave (animate_body) provides the bulk of side-to-side
+        // motion; the head only wags slightly as a reaction to it.
+        let swim_wave = (t * 2.0 * PI * FREQ).sin() * 0.05;
         self.heading += (self.turn_rate + swim_wave) * dt;
 
         // --- boundary correction ---
@@ -179,12 +313,20 @@ impl Koi {
         } else if (t * 0.1 + self.id).sin() > 0.97 {
             BURST_RANDOM_SPRINT
         } else {
-            1.0
+            // Idle: glide-and-pause. Real koi alternate between gentle
+            // forward drift and near-still hovers.
+            let lazy = (t * IDLE_SPEED_FREQ + self.id * 1.7).sin();
+            if lazy < PAUSE_THRESHOLD {
+                PAUSE_BURST
+            } else {
+                1.0 + IDLE_SPEED_AMP * lazy
+            }
         };
+        self.burst = burst;
         self.spine_x[0] += self.heading.cos() * self.speed * burst * dt;
         self.spine_y[0] += self.heading.sin() * self.speed * burst * dt;
 
-        // --- chain dynamics ---
-        self.propagate_chain();
+        // --- chain dynamics + body wave ---
+        self.animate_body(t);
     }
 }
