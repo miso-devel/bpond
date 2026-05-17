@@ -1,15 +1,16 @@
 //! Lotus pads floating on the pond surface.
 //!
-//! Each pad is a clean disc with a single pie-slice wedge removed,
-//! like a cake with one slice taken out. Other features:
+//! Each pad is a clean disc with a single V-shaped wedge cut from
+//! the rim, like a single notch out of a green coin. Other features:
 //!
-//! 1. **Pie-slice cut** from centre to rim — one wedge per pad, sized
-//!    like ~1/8 of a cake. Some pads' cuts are bigger, some smaller.
+//! 1. **V-shaped wedge cut** — widest at the rim, tapering to a point
+//!    at a random inner radius. Three per-pad parameters control the
+//!    wedge: where it points, how wide it opens, and how deep it
+//!    reaches. The wedge edge has a small deterministic wobble so it
+//!    reads as a natural cut rather than a mathematical sector.
 //! 2. **Radial veins** spreading out from the hub — typically 12-18
 //!    visible primary veins.
-//! 3. A **sunlit crescent** on the rim suggesting the leaf's gentle
-//!    saucer / cup shape and the angle of the light.
-//! 4. **Drift** — pads on a pond aren't static. Wind, currents, and
+//! 3. **Drift** — pads on a pond aren't static. Wind, currents, and
 //!    fish brushing past keep them in continuous motion.
 
 use crate::canvas::Canvas;
@@ -20,16 +21,12 @@ use std::f64::consts::{PI, TAU};
 // ---------------------------------------------------------------------------
 
 /// Body greens, picked to stay clearly above the dark blue water
-/// background so the leaf reads as a leaf rather than as a few bright
-/// specks of highlight on otherwise-invisible green.
+/// background so the leaf reads as a leaf, not as a few specks.
 const FILL: (u8, u8, u8) = (95, 155, 70);
 const MID: (u8, u8, u8) = (70, 125, 55);
 const EDGE: (u8, u8, u8) = (45, 90, 40);
 const HUB: (u8, u8, u8) = (55, 100, 50);
 const VEIN: (u8, u8, u8) = (50, 95, 42);
-/// Subtle highlight crescent — kept close to FILL so it doesn't read
-/// as a separate, mysterious bright object on top of the leaf.
-const HIGHLIGHT: (u8, u8, u8) = (130, 180, 90);
 
 // ---------------------------------------------------------------------------
 // Shape parameters
@@ -46,19 +43,25 @@ const RIM_BUMPS: f64 = 7.0;
 const RIM_BUMP_AMP: f64 = 0.0;
 const BREATH_AMP: f64 = 0.0;
 
-/// Pie-slice notch geometry. A single wedge per pad, sized like one
-/// piece of a cake cut into 7-12, with a random inner depth so some
-/// cuts reach almost to the centre and others stop earlier.
-const SLICE_HW_MIN: f64 = 0.26; // ~30° total
-const SLICE_HW_RANGE: f64 = 0.18; // up to ~50° total
-/// Inner radius (as a fraction of the pad's radius) at which the cut
-/// begins. 0 would mean the slice reaches the very centre.
-const SLICE_INNER_NP_MIN: f64 = 0.10;
-const SLICE_INNER_NP_RANGE: f64 = 0.45;
+/// V-wedge geometry. `WEDGE_HW_*` is the wedge half-width at the rim
+/// (in radians); the wedge tapers linearly to a point at `inner_np`.
+/// `WEDGE_INNER_NP_*` is the normalised radius at which the wedge tip
+/// sits — some pads have a tip close to the centre (deep cut), some
+/// further out (shallow notch).
+///
+/// With WEDGE_HW_MAX = 0.44 and INNER_NP_MIN = 0.30 the wedge
+/// removes about 7.2% of the disc area (computed analytically). The
+/// edge jitter adds at most ~5° to the rim half-width, pushing the
+/// worst case to roughly 8% — well under the 60% upper bound implied
+/// by the "leaf must stay at least 40% green" rule.
+const WEDGE_HW_MIN: f64 = 0.22;
+const WEDGE_HW_MAX: f64 = 0.42;
+const WEDGE_INNER_NP_MIN: f64 = 0.30;
+const WEDGE_INNER_NP_MAX: f64 = 0.65;
 
-/// Sun-lit crescent on the rim.
-const HIGHLIGHT_HALF_WIDTH: f64 = 0.6;
-const HIGHLIGHT_INNER_NP: f64 = 0.75;
+/// Peak deterministic edge jitter applied to the wedge half-width, in
+/// radians. Bounded so the slice can never balloon by more than this.
+const WEDGE_JITTER_AMP: f64 = 0.05;
 
 // ---------------------------------------------------------------------------
 // Drift physics
@@ -94,14 +97,18 @@ pub struct LilyPad {
     rim_phase: f64,
     rotation: f64,
     rotation_rate: f64,
-    /// Pie-slice cuts in the pad-local frame: each entry is
-    /// `(centre_angle, half_width, inner_np)`. The cut only applies
-    /// where the pixel's normalised radius `np` exceeds `inner_np`,
-    /// so some pads have a slice that reaches almost to the centre
-    /// and others a shallower notch that stops well before it.
+    /// V-shaped wedges cut from the disc, in the pad-local frame.
+    /// Each tuple is `(centre_angle, hw_at_rim, inner_np)`:
+    ///   - `centre_angle` — angular direction the wedge points
+    ///   - `hw_at_rim` — half the wedge's angular width at the rim
+    ///   - `inner_np` — normalised radius at which the wedge tip sits
+    ///
+    /// Pixels with `np < inner_np` are never cut. From `inner_np` out
+    /// to the rim the angular cut grows linearly from 0 to `hw_at_rim`.
+    /// 1 wedge per pad in current designs, but the struct accepts a
+    /// `Vec` to leave room for future variants without a breaking
+    /// change.
     notches: Vec<(f64, f64, f64)>,
-    /// Angle of the sun-lit highlight crescent (pad-local frame).
-    highlight_angle: f64,
 }
 
 impl LilyPad {
@@ -114,7 +121,6 @@ impl LilyPad {
         rotation: f64,
         rotation_rate: f64,
         notches: Vec<(f64, f64, f64)>,
-        highlight_angle: f64,
     ) -> Self {
         LilyPad {
             x,
@@ -128,24 +134,29 @@ impl LilyPad {
             rotation,
             rotation_rate,
             notches,
-            highlight_angle,
         }
     }
 
-    /// True if a pixel falls inside any pie-slice cut. `np` is the
-    /// pixel's normalised radius (0 at centre, 1 at rim). The slice
-    /// edge is wobbled by a small, deterministic noise function so it
-    /// reads as a torn / natural cut instead of a perfectly straight
-    /// line — but the wobble is bounded so the slice can never balloon
-    /// past its base size by more than ~5°.
+    /// True if a pixel is inside any V-shaped wedge cut. `np` is the
+    /// pixel's normalised radius (0 at centre, 1 at rim).
+    ///
+    /// The wedge is a true taper: at `np == inner_np` the angular
+    /// half-width is 0 (a point), and it grows linearly to `hw_at_rim`
+    /// as np climbs to 1. A bounded, position-dependent jitter is
+    /// added to the half-width so the cut edge isn't a perfect line.
+    /// The jitter is also scaled by the taper progress so the tip
+    /// stays sharp.
     fn in_any_notch(&self, local_angle: f64, np: f64) -> bool {
-        for &(center, hw, inner_np) in &self.notches {
-            if np < inner_np {
+        for &(center, hw_at_rim, inner_np) in &self.notches {
+            if np <= inner_np {
                 continue;
             }
+            let progress = (np - inner_np) / (1.0 - inner_np);
             let phase = np * 6.0 + center * 3.1;
-            let jitter = phase.sin() * 0.030 + (phase * 2.3 + 0.7).cos() * 0.020;
-            if Self::angle_dist(local_angle, center) < hw + jitter {
+            let jitter_unit = phase.sin() * (WEDGE_JITTER_AMP * 0.6)
+                + (phase * 2.3 + 0.7).cos() * (WEDGE_JITTER_AMP * 0.4);
+            let effective_hw = (hw_at_rim + jitter_unit) * progress;
+            if Self::angle_dist(local_angle, center) < effective_hw {
                 return true;
             }
         }
@@ -201,13 +212,22 @@ impl LilyPad {
         self.radius * (1.0 + bumps + breath)
     }
 
-    /// Wraparound angular distance (shortest path).
+    /// Wraparound angular distance (shortest path), in `[0, π]`.
+    ///
+    /// `a` and `b` may be any finite angle — they don't need to be
+    /// normalised first. We map `a - b` into `[0, TAU)` with
+    /// `rem_euclid`, then fold values above π back through TAU.
+    /// The previous version computed `(a - b).abs()` and could
+    /// produce negative results for arguments outside `[-π, π]`,
+    /// which silently broke the wedge cut for pads with large
+    /// `rotation` values.
     fn angle_dist(a: f64, b: f64) -> f64 {
-        let mut d = (a - b).abs();
+        let d = (a - b).rem_euclid(TAU);
         if d > PI {
-            d = TAU - d;
+            TAU - d
+        } else {
+            d
         }
-        d
     }
 
     pub fn draw(&self, canvas: &mut Canvas, scale: f64, t: f64) {
@@ -231,9 +251,8 @@ impl LilyPad {
                 let local_angle = angle - self.rotation;
                 let np = d / r_local;
 
-                // Pie-slice cut with a slightly irregular edge so it
-                // reads as a torn / natural cut rather than a perfectly
-                // straight line.
+                // V-shaped wedge cut from the rim with a slightly
+                // wobbled edge.
                 if self.in_any_notch(local_angle, np) {
                     continue;
                 }
@@ -249,14 +268,8 @@ impl LilyPad {
                 let vein_d = (vein_step - vein_step.round()).abs();
                 let near_vein = vein_d < VEIN_HALF_WIDTH && (0.14..0.90).contains(&np);
 
-                // Sun-lit crescent on the outer rim band.
-                let near_highlight = (HIGHLIGHT_INNER_NP..=0.92).contains(&np)
-                    && Self::angle_dist(local_angle, self.highlight_angle) < HIGHLIGHT_HALF_WIDTH;
-
                 let (r, g, b) = if np > 0.92 {
                     EDGE
-                } else if near_highlight {
-                    HIGHLIGHT
                 } else if near_vein {
                     VEIN
                 } else if np > 0.72 {
@@ -299,14 +312,14 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             -1.0
         };
         let rotation_rate = rate_mag * rate_sign;
-        // One pie-slice cut per pad. The angle, size, and inner depth
-        // all vary — some pads have a slice reaching almost to the
-        // centre, others a shallower notch that stops earlier.
-        let slice_angle = pseudo_rand(seed + 11.0) * TAU;
-        let slice_hw = SLICE_HW_MIN + pseudo_rand(seed + 12.0) * SLICE_HW_RANGE;
-        let slice_inner = SLICE_INNER_NP_MIN + pseudo_rand(seed + 13.0) * SLICE_INNER_NP_RANGE;
-        let notches = vec![(slice_angle, slice_hw, slice_inner)];
-        let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
+        // One V-wedge cut per pad. Three independent rolls: where it
+        // points, how wide it opens at the rim, and how deep its tip
+        // sits inside the disc.
+        let wedge_angle = pseudo_rand(seed + 11.0) * TAU;
+        let wedge_hw = WEDGE_HW_MIN + pseudo_rand(seed + 12.0) * (WEDGE_HW_MAX - WEDGE_HW_MIN);
+        let wedge_inner = WEDGE_INNER_NP_MIN
+            + pseudo_rand(seed + 13.0) * (WEDGE_INNER_NP_MAX - WEDGE_INNER_NP_MIN);
+        let notches = vec![(wedge_angle, wedge_hw, wedge_inner)];
         pads.push(LilyPad::new(
             x,
             y,
@@ -315,7 +328,6 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             rotation,
             rotation_rate,
             notches,
-            highlight_angle,
         ));
     }
     pads
@@ -326,7 +338,44 @@ mod tests {
     use super::*;
 
     fn make_pad() -> LilyPad {
-        LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI)
+        LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.3)])
+    }
+
+    /// Empirical painted-pixel ratio against the full disc — used by
+    /// the tests that bound how much of the leaf the wedge eats.
+    fn painted_ratio(pad: &LilyPad, scale: f64) -> f64 {
+        let r_sp = pad.radius * scale;
+        let r_int = r_sp.ceil() as i32;
+        // Canvas large enough to fully contain the pad on every side.
+        let cx_sp = (pad.x * scale) as i32;
+        let cy_sp = (pad.y * scale) as i32;
+        let max_x_sp = cx_sp + r_int + 4;
+        let max_y_sp = cy_sp + r_int + 4;
+        let cw = (max_x_sp.max(0) as usize) / 2 + 2;
+        let ch = (max_y_sp.max(0) as usize) / 4 + 2;
+        let mut canvas = Canvas::new(cw, ch);
+        pad.draw(&mut canvas, scale, 0.0);
+
+        let mut painted = 0usize;
+        let mut disc = 0usize;
+        for dy in -r_int..=r_int {
+            for dx in -r_int..=r_int {
+                let d = ((dx * dx + dy * dy) as f64).sqrt();
+                if d > r_sp {
+                    continue;
+                }
+                disc += 1;
+                let px = cx_sp + dx;
+                let py = cy_sp + dy;
+                if px < 0 || py < 0 {
+                    continue;
+                }
+                if canvas.get(px as usize, py as usize).0 {
+                    painted += 1;
+                }
+            }
+        }
+        painted as f64 / disc as f64
     }
 
     #[test]
@@ -339,7 +388,7 @@ mod tests {
 
     #[test]
     fn radius_stays_within_envelope() {
-        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, vec![(0.0, 0.4, 0.0)], PI);
+        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, vec![(0.0, 0.4, 0.3)]);
         for i in 0..200 {
             let t = i as f64 * 0.1;
             for j in 0..36 {
@@ -381,26 +430,11 @@ mod tests {
     }
 
     #[test]
-    fn draw_renders_highlight_band() {
-        // Highlight is brighter than any other green band — should be
-        // present on a pad with a non-zero radius.
-        let p = make_pad();
-        let mut canvas = Canvas::new(80, 60);
-        p.draw(&mut canvas, 2.0, 0.0);
-        let found = (0..canvas.w)
-            .flat_map(|x| (0..canvas.h).map(move |y| (x, y)))
-            .any(|(x, y)| {
-                let (on, r, g, b) = canvas.get(x, y);
-                on && (r, g, b) == (HIGHLIGHT.0, HIGHLIGHT.1, HIGHLIGHT.2)
-            });
-        assert!(found, "sun-lit crescent should be visible");
-    }
-
-    #[test]
     fn notch_creates_a_gap_on_the_rim() {
-        // Pad with a pie-slice cut pointing east. The rim pixel due
-        // east should be inside the slice and therefore unpainted.
-        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
+        // Pad with a V-wedge cut pointing east, tip at np=0.30. The
+        // rim pixel due east should be inside the wedge and therefore
+        // unpainted.
+        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.3)]);
         let mut canvas = Canvas::new(160, 60);
         p.draw(&mut canvas, 2.0, 0.0);
         // Center of canvas approx (80, 60) (pad center px = 40*2=80, 30*2=60).
@@ -419,7 +453,7 @@ mod tests {
 
     #[test]
     fn tick_returns_pad_toward_home_after_displacement() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.3)]);
         p.x = 35.0;
         p.y = 30.0;
         let initial_dist = ((35.0_f64 - 20.0).powi(2) + (30.0_f64 - 15.0).powi(2)).sqrt();
@@ -436,7 +470,7 @@ mod tests {
 
     #[test]
     fn koi_wake_pushes_pad_in_swimming_direction() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.3)]);
         let initial_x = p.x;
         let koi_data = [(18.0_f64, 15.0_f64, 10.0_f64, 0.0_f64)];
         for i in 0..40 {
@@ -451,7 +485,7 @@ mod tests {
 
     #[test]
     fn ambient_current_produces_visible_drift() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, vec![(0.0, 0.4, 0.3)]);
         let mut max_excursion: f64 = 0.0;
         for i in 0..1000 {
             let t = i as f64 * 0.05;
@@ -484,6 +518,136 @@ mod tests {
         for p in spawn_pads(w, h) {
             assert!(p.x > 0.0 && p.x < w);
             assert!(p.y > 0.0 && p.y < h);
+        }
+    }
+
+    // -- wedge geometry invariants ----------------------------------------
+
+    #[test]
+    fn wedge_never_cuts_inside_its_inner_np() {
+        // A wedge at angle 0 with inner_np=0.40 must leave every pixel
+        // with np <= 0.40 alone, regardless of angle.
+        let p = LilyPad::new(0.0, 0.0, 10.0, 0.0, 0.0, 0.0, vec![(0.0, 0.5, 0.40)]);
+        for i in 0..72 {
+            let angle = i as f64 / 72.0 * TAU - PI;
+            for &np in &[0.0_f64, 0.10, 0.20, 0.30, 0.39, 0.40] {
+                assert!(
+                    !p.in_any_notch(angle, np),
+                    "wedge cut at np={np}, angle={angle} (inner_np=0.40 should be safe)",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wedge_tapers_to_a_point_at_inner_np() {
+        // Just inside inner_np the cut should be very narrow; near
+        // the rim it should reach (close to) the full hw_at_rim.
+        let p = LilyPad::new(0.0, 0.0, 10.0, 0.0, 0.0, 0.0, vec![(0.0, 0.5, 0.40)]);
+        // 0.30 rad off-axis: that's well inside hw_at_rim=0.5 but
+        // should NOT be inside the wedge when np barely exceeds the
+        // inner threshold.
+        assert!(
+            !p.in_any_notch(0.30, 0.42),
+            "wedge should taper — off-axis pixel near tip must stay painted",
+        );
+        // Same angle near the rim: now well inside the wedge.
+        assert!(
+            p.in_any_notch(0.30, 0.99),
+            "wedge should be at near-full width near the rim",
+        );
+    }
+
+    #[test]
+    fn wedge_only_cuts_around_its_centre_angle() {
+        // The wedge points east (angle 0). At the rim, anything more
+        // than `hw_at_rim + jitter_amp` away from east must stay.
+        let hw = 0.4;
+        let p = LilyPad::new(0.0, 0.0, 10.0, 0.0, 0.0, 0.0, vec![(0.0, hw, 0.30)]);
+        let safe_offset = hw + WEDGE_JITTER_AMP + 0.02;
+        // Probe several angles well outside the wedge cone.
+        for &probe in &[PI, PI / 2.0, -PI / 2.0, PI - 0.1, -PI + 0.1] {
+            assert!(
+                !p.in_any_notch(probe, 0.99),
+                "angle {probe} should be outside the wedge (centre=0, hw={hw}, safe>{safe_offset})",
+            );
+        }
+    }
+
+    // -- 40% painted-area floor -------------------------------------------
+
+    #[test]
+    fn every_spawned_pad_keeps_at_least_40_percent_painted() {
+        // The user-facing rule: the leaf must remain visibly a leaf.
+        // We render each spawned pad and count how much of the full
+        // disc is still painted green. With the parameter ranges
+        // chosen, every pad should retain well over 40%.
+        let pads = spawn_pads(80.0, 46.0);
+        for (i, pad) in pads.iter().enumerate() {
+            let ratio = painted_ratio(pad, 2.0);
+            assert!(
+                ratio >= 0.40,
+                "pad #{i} at ({:.1},{:.1}): only {:.1}% painted (must stay ≥ 40%)",
+                pad.x,
+                pad.y,
+                ratio * 100.0,
+            );
+        }
+    }
+
+    #[test]
+    fn pad_without_any_wedge_paints_almost_the_whole_disc() {
+        // Sanity check on painted_ratio itself: a pad with zero
+        // wedges should paint ≥ 99% of its disc.
+        let p = LilyPad::new(32.9, 10.9, 6.5, 0.0, 0.0, 0.0, vec![]);
+        let ratio = painted_ratio(&p, 2.0);
+        assert!(
+            ratio > 0.99,
+            "pad with no wedge should be fully painted: got {:.3}",
+            ratio,
+        );
+    }
+
+    #[test]
+    fn worst_case_wedge_still_leaves_disc_majority_painted() {
+        // Manually pick the most aggressive wedge inside the spawn
+        // ranges and verify it still leaves > 60% of the disc.
+        let p = LilyPad::new(
+            20.0,
+            15.0,
+            6.5,
+            0.0,
+            0.0,
+            0.0,
+            vec![(0.0, WEDGE_HW_MAX, WEDGE_INNER_NP_MIN)],
+        );
+        let ratio = painted_ratio(&p, 2.0);
+        assert!(
+            ratio >= 0.60,
+            "worst-case wedge cut too much: only {:.1}% painted",
+            ratio * 100.0,
+        );
+    }
+
+    #[test]
+    fn many_random_pads_keep_at_least_40_percent_painted() {
+        // Generate a hundred deterministic pads with varied wedge
+        // parameters drawn from the same ranges as spawn_pads and
+        // assert the floor holds for every one of them.
+        use crate::rng::pseudo_rand;
+        for i in 0..100u32 {
+            let s = i as f64 * 7.13 + 0.5;
+            let hw = WEDGE_HW_MIN + pseudo_rand(s) * (WEDGE_HW_MAX - WEDGE_HW_MIN);
+            let inner = WEDGE_INNER_NP_MIN
+                + pseudo_rand(s + 1.0) * (WEDGE_INNER_NP_MAX - WEDGE_INNER_NP_MIN);
+            let centre = pseudo_rand(s + 2.0) * TAU;
+            let p = LilyPad::new(20.0, 15.0, 6.5, 0.0, 0.0, 0.0, vec![(centre, hw, inner)]);
+            let ratio = painted_ratio(&p, 2.0);
+            assert!(
+                ratio >= 0.40,
+                "iter {i} (hw={hw:.3}, inner={inner:.3}): only {:.1}% painted",
+                ratio * 100.0,
+            );
         }
     }
 }
