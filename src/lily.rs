@@ -1,10 +1,10 @@
 //! Lotus pads floating on the pond surface.
 //!
-//! Each pad is a clean disc with one or two pie-slice wedges removed,
-//! like a cake with a slice taken out. Other features:
+//! Each pad is a clean disc with a single pie-slice wedge removed,
+//! like a cake with one slice taken out. Other features:
 //!
-//! 1. **Pie-slice cuts** from centre to rim — either one larger slice
-//!    or two smaller ones, never removing more than ~40% of the disc.
+//! 1. **Pie-slice cut** from centre to rim — one wedge per pad, sized
+//!    like ~1/8 of a cake. Some pads' cuts are bigger, some smaller.
 //! 2. **Radial veins** spreading out from the hub — typically 12-18
 //!    visible primary veins.
 //! 3. A **sunlit crescent** on the rim suggesting the leaf's gentle
@@ -19,13 +19,17 @@ use std::f64::consts::{PI, TAU};
 // Colour palette
 // ---------------------------------------------------------------------------
 
-const FILL: (u8, u8, u8) = (60, 110, 45);
-const MID: (u8, u8, u8) = (45, 85, 35);
-const EDGE: (u8, u8, u8) = (20, 48, 24);
-const HUB: (u8, u8, u8) = (28, 55, 30);
-const VEIN: (u8, u8, u8) = (30, 60, 28);
-/// Brighter green along the sun-lit rim crescent.
-const HIGHLIGHT: (u8, u8, u8) = (110, 165, 80);
+/// Body greens, picked to stay clearly above the dark blue water
+/// background so the leaf reads as a leaf rather than as a few bright
+/// specks of highlight on otherwise-invisible green.
+const FILL: (u8, u8, u8) = (95, 155, 70);
+const MID: (u8, u8, u8) = (70, 125, 55);
+const EDGE: (u8, u8, u8) = (45, 90, 40);
+const HUB: (u8, u8, u8) = (55, 100, 50);
+const VEIN: (u8, u8, u8) = (50, 95, 42);
+/// Subtle highlight crescent — kept close to FILL so it doesn't read
+/// as a separate, mysterious bright object on top of the leaf.
+const HIGHLIGHT: (u8, u8, u8) = (130, 180, 90);
 
 // ---------------------------------------------------------------------------
 // Shape parameters
@@ -42,14 +46,11 @@ const RIM_BUMPS: f64 = 7.0;
 const RIM_BUMP_AMP: f64 = 0.0;
 const BREATH_AMP: f64 = 0.0;
 
-/// Pie-slice notch geometry. A "notch" is an angular wedge cut from
-/// centre to rim — the missing slice of cake. Per-pad variation is
-/// limited to: 1 slice or 2 slices, big or small. Sizes are tuned to
-/// read as a single missing wedge, not a half-eaten disc.
-const SINGLE_SLICE_HW_MIN: f64 = 0.18; // ~20° total
-const SINGLE_SLICE_HW_RANGE: f64 = 0.18; // up to ~40° total
-const TWIN_SLICE_HW_MIN: f64 = 0.12; // ~14° total each
-const TWIN_SLICE_HW_RANGE: f64 = 0.10; // up to ~25° total each
+/// Pie-slice notch geometry. A single wedge cut from centre to rim,
+/// sized like one piece of a cake cut into 7-12 — natural enough to
+/// read as "a slice taken out" without dominating the silhouette.
+const SLICE_HW_MIN: f64 = 0.26; // ~30° total
+const SLICE_HW_RANGE: f64 = 0.18; // up to ~50° total
 
 /// Sun-lit crescent on the rim.
 const HIGHLIGHT_HALF_WIDTH: f64 = 0.6;
@@ -278,23 +279,12 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             -1.0
         };
         let rotation_rate = rate_mag * rate_sign;
-        // Per-pad variation: either one bigger slice removed or two
-        // smaller slices on opposite sides. Each slice is a pie wedge
-        // from centre to rim, like a piece of cake taken out.
-        let twin = pseudo_rand(seed + 10.0) > 0.5;
-        let notches = if twin {
-            let a1 = pseudo_rand(seed + 11.0) * TAU;
-            let hw1 = TWIN_SLICE_HW_MIN + pseudo_rand(seed + 12.0) * TWIN_SLICE_HW_RANGE;
-            let hw2 = TWIN_SLICE_HW_MIN + pseudo_rand(seed + 14.0) * TWIN_SLICE_HW_RANGE;
-            // Put the second slice on the opposite side with jitter so
-            // the two cuts never overlap.
-            let sep = PI * (0.6 + pseudo_rand(seed + 15.0) * 0.4);
-            vec![(a1, hw1), (a1 + sep, hw2)]
-        } else {
-            let a = pseudo_rand(seed + 11.0) * TAU;
-            let hw = SINGLE_SLICE_HW_MIN + pseudo_rand(seed + 12.0) * SINGLE_SLICE_HW_RANGE;
-            vec![(a, hw)]
-        };
+        // One pie-slice cut per pad. The angle and size vary, so some
+        // pads show a bigger missing wedge and some smaller, but it's
+        // always a single cut.
+        let slice_angle = pseudo_rand(seed + 11.0) * TAU;
+        let slice_hw = SLICE_HW_MIN + pseudo_rand(seed + 12.0) * SLICE_HW_RANGE;
+        let notches = vec![(slice_angle, slice_hw)];
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
         pads.push(LilyPad::new(
             x,
