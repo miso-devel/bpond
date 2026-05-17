@@ -43,15 +43,17 @@ const DROPLET_SHADOW: (u8, u8, u8) = (40, 75, 40);
 const VEIN_COUNT: f64 = 14.0;
 const VEIN_HALF_WIDTH: f64 = 0.03;
 
-/// Rim bumps — gentle scalloping around the edge.
+/// Rim bumps — very subtle scalloping. Keep small so the silhouette
+/// reads as a clean circle rather than a wavy blob.
 const RIM_BUMPS: f64 = 7.0;
-const RIM_BUMP_AMP: f64 = 0.05;
+const RIM_BUMP_AMP: f64 = 0.03;
 const BREATH_AMP: f64 = 0.03;
 
 /// Notch geometry. The V cut starts at the rim and narrows linearly
-/// toward `NOTCH_INNER_NP` (where the petiole connects below water).
-const NOTCH_INNER_NP: f64 = 0.30;
-const NOTCH_HALF_WIDTH_MAX: f64 = 0.32; // ≈ 18° half-width at the rim
+/// toward `NOTCH_INNER_NP`. Tuned conservatively so each pad reads as
+/// "a circle with a small bite missing" rather than a near-bisected leaf.
+const NOTCH_INNER_NP: f64 = 0.65;
+const NOTCH_HALF_WIDTH_MAX: f64 = 0.15; // ≈ 8.6° half-width at the rim
 
 /// Sun-lit crescent on the rim.
 const HIGHLIGHT_HALF_WIDTH: f64 = 0.6;
