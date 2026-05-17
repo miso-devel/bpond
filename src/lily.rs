@@ -125,10 +125,21 @@ impl LilyPad {
         }
     }
 
-    fn in_any_notch(&self, local_angle: f64) -> bool {
-        self.notches
-            .iter()
-            .any(|&(c, hw)| Self::angle_dist(local_angle, c) < hw)
+    /// True if a pixel falls inside any pie-slice cut. `np` is the
+    /// pixel's normalised radius (0 at centre, 1 at rim). The slice
+    /// edge is wobbled by a small, deterministic noise function so it
+    /// reads as a torn / natural cut instead of a perfectly straight
+    /// line — but the wobble is bounded so the slice can never balloon
+    /// past its base size by more than ~5°.
+    fn in_any_notch(&self, local_angle: f64, np: f64) -> bool {
+        for &(center, hw) in &self.notches {
+            let phase = np * 6.0 + center * 3.1;
+            let jitter = phase.sin() * 0.030 + (phase * 2.3 + 0.7).cos() * 0.020;
+            if Self::angle_dist(local_angle, center) < hw + jitter {
+                return true;
+            }
+        }
+        false
     }
 
     #[cfg(test)]
@@ -208,11 +219,12 @@ impl LilyPad {
                     continue;
                 }
                 let local_angle = angle - self.rotation;
+                let np = d / r_local;
 
-                // Pie-slice cut: removes everything inside the angular
-                // wedge from centre to rim, like a slice of cake taken
-                // out of the disc.
-                if self.in_any_notch(local_angle) {
+                // Pie-slice cut with a slightly irregular edge so it
+                // reads as a torn / natural cut rather than a perfectly
+                // straight line.
+                if self.in_any_notch(local_angle, np) {
                     continue;
                 }
 
@@ -221,8 +233,6 @@ impl LilyPad {
                     canvas.dot(cx_px as i32 + dx, cy_px as i32 + dy, HUB.0, HUB.1, HUB.2);
                     continue;
                 }
-
-                let np = d / r_local;
 
                 // Vein detection: radial sawtooth distance test.
                 let vein_step = local_angle * VEIN_COUNT / TAU;
