@@ -69,6 +69,22 @@ impl Pond {
         }
         self.ripples.retain(|r| r.is_alive());
 
+        // Lily pads drift with ambient current and pick up wake from
+        // any nearby koi. Collect (x, y, vx, vy) per fish — the lily
+        // tick reads it without aliasing fish.
+        let koi_data: Vec<(f64, f64, f64, f64)> = self
+            .fish
+            .iter()
+            .map(|k| {
+                let (kx, ky) = k.head();
+                let (kvx, kvy) = k.velocity();
+                (kx, ky, kvx, kvy)
+            })
+            .collect();
+        for pad in &mut self.lilies {
+            pad.tick(dt, t, &koi_data);
+        }
+
         self.bubble_spawn_timer -= dt;
         if self.bubble_spawn_timer <= 0.0 {
             let bx = pseudo_rand(self.bubble_rng) * w;
