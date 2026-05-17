@@ -3,6 +3,7 @@
 use crate::bubble::Bubble;
 use crate::food::{Food, EAT_RANGE_SQ};
 use crate::koi::Koi;
+use crate::lily::{spawn_pads, LilyPad};
 use crate::rain::RainSystem;
 use crate::ripple::Ripple;
 use crate::rng::pseudo_rand;
@@ -12,6 +13,7 @@ pub struct Pond {
     pub foods: Vec<Food>,
     pub ripples: Vec<Ripple>,
     pub bubbles: Vec<Bubble>,
+    pub lilies: Vec<LilyPad>,
     pub rain: RainSystem,
     pub rain_mode: bool,
     bubble_spawn_timer: f64,
@@ -30,6 +32,7 @@ impl Pond {
             foods: Vec::new(),
             ripples: Vec::new(),
             bubbles: Vec::new(),
+            lilies: spawn_pads(w, h),
             rain: RainSystem::new(),
             rain_mode: false,
             bubble_spawn_timer: 1.0,

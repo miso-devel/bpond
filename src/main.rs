@@ -2,6 +2,7 @@ mod bubble;
 mod canvas;
 mod food;
 mod koi;
+mod lily;
 mod pond;
 mod rain;
 mod ripple;
@@ -66,6 +67,12 @@ fn main() -> Result<()> {
             draw_food(&pond, &mut canvas, scale);
             for k in &pond.fish {
                 k.draw(&mut canvas, elapsed, scale);
+            }
+            // Lily pads float on the water surface, so they're painted
+            // last — koi underneath are partially occluded where pads
+            // overlap.
+            for pad in &pond.lilies {
+                pad.draw(&mut canvas, scale, elapsed);
             }
             if debug {
                 canvas.render(buf, 0, 1, area);
