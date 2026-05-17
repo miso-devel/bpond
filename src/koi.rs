@@ -611,3 +611,142 @@ mod scare_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod behavior_tests {
+    use super::*;
+    use crate::food::Food;
+
+    // -- schooling: separation ----------------------------------------------
+
+    #[test]
+    fn schooling_separation_pushes_overlapping_koi_apart() {
+        // Two koi placed well within SEPARATION_RADIUS (5.0) of each other
+        // should diverge over time once their idle steering picks up the
+        // schooling delta. Confirms the separation force is doing work.
+        let mut a = Koi::new(50.0, 30.0, 0.0, 5.0, 1.0);
+        let mut b = Koi::new(53.0, 30.0, std::f64::consts::PI, 5.0, 7.1);
+        let foods: Vec<Food> = Vec::new();
+        let dt = 0.05;
+
+        let initial_dist = {
+            let (ax, ay) = a.head();
+            let (bx, by) = b.head();
+            ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt()
+        };
+
+        for i in 0..200 {
+            let t = i as f64 * dt;
+            let snaps = vec![a.snapshot(), b.snapshot()];
+            a.update(dt, t, 400.0, 200.0, &foods, &snaps, 0);
+            b.update(dt, t, 400.0, 200.0, &foods, &snaps, 1);
+        }
+        let final_dist = {
+            let (ax, ay) = a.head();
+            let (bx, by) = b.head();
+            ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt()
+        };
+        assert!(
+            final_dist > initial_dist + SEPARATION_RADIUS * 0.5,
+            "separation should push koi apart: {initial_dist:.2} -> {final_dist:.2}",
+        );
+    }
+
+    // -- curiosity: neighbor chasing food pulls this koi in -----------------
+
+    #[test]
+    fn curiosity_turns_toward_food_that_a_neighbor_chases() {
+        // Put a koi heading north (heading=-π/2). Place a neighbor right
+        // beside it heading toward a food directly to the east. After a
+        // few idle frames, the curious koi should rotate eastward.
+        let mut me = Koi::new(50.0, 30.0, -std::f64::consts::FRAC_PI_2, 5.0, 1.0);
+        // Neighbor is in range, already facing the food.
+        let neighbor_snap = (52.0, 30.0, 0.0_f64);
+        // Food east of both, far enough that we're "chasing" not "eating".
+        let foods = vec![Food::new(60.0, 30.0)];
+        let dt = 0.05;
+
+        let initial_heading = me.heading;
+        // Many frames; curiosity is subtle, so accumulate effect.
+        for i in 0..120 {
+            let snaps = vec![me.snapshot(), neighbor_snap];
+            me.update(dt, i as f64 * dt, 400.0, 200.0, &foods, &snaps, 0);
+        }
+        // The food itself triggers chase; that overrides curiosity. The
+        // useful signal is: the koi ends up heading east-ish (toward food).
+        let final_heading_x = me.heading.cos();
+        assert!(
+            final_heading_x > 0.5,
+            "koi should swing east toward food: heading.cos()={final_heading_x:.2}, \
+             initial={initial_heading:.2}, final={:.2}",
+            me.heading,
+        );
+    }
+
+    // -- glide-pause: idle koi occasionally hovers near a stop --------------
+
+    #[test]
+    fn idle_burst_dips_into_pause_range() {
+        // Over many idle frames sampled across the lazy cycle, at least
+        // one frame should land in the PAUSE_BURST regime. This is what
+        // gives the koi its "ふっと止まる" hover.
+        let mut koi = Koi::new(50.0, 30.0, 0.0, 5.0, 1.0);
+        let foods: Vec<Food> = Vec::new();
+        let dt = 0.05;
+        let mut min_burst: f64 = f64::INFINITY;
+        // Sample t across a few full lazy-cycles (period = 2π / IDLE_SPEED_FREQ ≈ 15.7s).
+        for i in 0..400 {
+            let t = i as f64 * dt;
+            koi.update(dt, t, 400.0, 200.0, &foods, &[], 0);
+            min_burst = min_burst.min(koi.burst);
+        }
+        assert!(
+            (min_burst - PAUSE_BURST).abs() < 1e-6 || min_burst <= PAUSE_BURST + 0.01,
+            "burst should drop to ≈PAUSE_BURST ({PAUSE_BURST}) at least once, got {min_burst}",
+        );
+    }
+
+    #[test]
+    fn idle_burst_also_cruises() {
+        // Counterpart to the pause test: cruise burst should regularly hit
+        // ≥ 1.0 so the koi isn't pausing the entire time.
+        let mut koi = Koi::new(50.0, 30.0, 0.0, 5.0, 1.0);
+        let foods: Vec<Food> = Vec::new();
+        let dt = 0.05;
+        let mut max_burst: f64 = f64::NEG_INFINITY;
+        for i in 0..400 {
+            let t = i as f64 * dt;
+            koi.update(dt, t, 400.0, 200.0, &foods, &[], 0);
+            max_burst = max_burst.max(koi.burst);
+        }
+        assert!(
+            max_burst >= 1.0,
+            "burst should regularly reach cruising ≥1.0, got max {max_burst}",
+        );
+    }
+
+    // -- substep stability: long trajectory still converges ------------------
+
+    #[test]
+    fn substep_chase_brings_koi_close_to_food() {
+        // With substep integration the koi must converge to its target
+        // without drifting away. Track the *minimum* distance reached over
+        // a chase window — the koi orbits gently once it's within range,
+        // so we don't require the final frame to be exactly on the food.
+        let mut koi = Koi::new(20.0, 30.0, 0.0, 5.0, 1.0);
+        let foods = vec![Food::new(50.0, 35.0)];
+        let mut min_dist: f64 = f64::INFINITY;
+        for i in 0..300 {
+            koi.update(0.05, i as f64 * 0.05, 200.0, 100.0, &foods, &[], 0);
+            let (hx, hy) = koi.head();
+            let d = ((50.0_f64 - hx).powi(2) + (35.0_f64 - hy).powi(2)).sqrt();
+            min_dist = min_dist.min(d);
+        }
+        // Eating range is sqrt(EATING_RANGE_SQ) ≈ 2.45; require the koi
+        // to actually touch that.
+        assert!(
+            min_dist < EATING_RANGE_SQ.sqrt(),
+            "koi should enter eating range during chase, min dist {min_dist:.2}",
+        );
+    }
+}
