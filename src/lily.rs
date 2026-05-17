@@ -43,12 +43,12 @@ const DROPLET_SHADOW: (u8, u8, u8) = (40, 75, 40);
 const VEIN_COUNT: f64 = 14.0;
 const VEIN_HALF_WIDTH: f64 = 0.03;
 
-/// Rim bumps disabled — the silhouette should read as a clean circle.
-/// Variation between pads comes from the notch placement / size instead.
+/// Rim bumps and breath both disabled — the leaf must never extend
+/// past its base circle. Variation between pads comes from the notch
+/// alone; the silhouette is otherwise a strict, stable circle.
 const RIM_BUMPS: f64 = 7.0;
 const RIM_BUMP_AMP: f64 = 0.0;
-/// Whole-leaf breathing — very subtle, just enough to feel alive.
-const BREATH_AMP: f64 = 0.015;
+const BREATH_AMP: f64 = 0.0;
 
 /// Notch geometry midpoints, only used by tests. Spawned pads pick a
 /// per-pad "notch size" in [0, 1] which drives both depth and width
@@ -323,8 +323,11 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
         // width so the bite scales coherently — some pads have a big
         // く wedge bitten out of them, others a small one.
         let notch_size = pseudo_rand(seed + 10.0);
-        let notch_inner_np = 0.85 - notch_size * 0.45; // small bite 0.85 → big bite 0.40
-        let notch_half_width = 0.10 + notch_size * 0.22; // small 0.10 rad → big 0.32 rad
+        // Conservative range — even the "big" bite stays a disciplined
+        // く shape. Anything deeper or wider stops reading as a lotus
+        // leaf and starts looking broken.
+        let notch_inner_np = 0.85 - notch_size * 0.23; // 0.85 (small) → 0.62 (big)
+        let notch_half_width = 0.08 + notch_size * 0.10; // 0.08 rad (small) → 0.18 rad (big)
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
         let droplet_count = 3 + (pseudo_rand(seed + 8.0) * 4.0) as usize; // 3-6
         let mut droplets = Vec::with_capacity(droplet_count);
