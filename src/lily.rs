@@ -282,17 +282,25 @@ impl LilyPad {
 /// same arrangement of pads, notches, highlights, and droplets.
 pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
     use crate::rng::pseudo_rand;
-    const N: usize = 6;
+    const N: usize = 10;
     let mut pads = Vec::with_capacity(N);
     for i in 0..N {
         let seed = i as f64 * 13.7 + 4.2;
         let x = (0.1 + pseudo_rand(seed) * 0.8) * w;
         let y = (0.1 + pseudo_rand(seed + 1.0) * 0.8) * h;
-        let radius = 4.0 + pseudo_rand(seed + 2.0) * 3.0; // 4–7 world units
+        let radius = 5.0 + pseudo_rand(seed + 2.0) * 3.0; // 5–8 world units
         let rim_phase = pseudo_rand(seed + 3.0) * TAU;
         let rotation = pseudo_rand(seed + 4.0) * TAU;
-        // Wider rotation range — pads turn visibly over ~20-40 s.
-        let rotation_rate = (pseudo_rand(seed + 5.0) - 0.5) * 0.3;
+        // Rotation rate: 0.10–0.30 rad/s magnitude with random sign.
+        // Floor on magnitude guarantees every pad turns visibly (a full
+        // rotation in 20-60 s) rather than half the pads sitting still.
+        let rate_mag = 0.10 + pseudo_rand(seed + 5.0) * 0.20;
+        let rate_sign = if pseudo_rand(seed + 9.0) > 0.5 {
+            1.0
+        } else {
+            -1.0
+        };
+        let rotation_rate = rate_mag * rate_sign;
         let notch_angle = pseudo_rand(seed + 6.0) * TAU;
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
         let droplet_count = 3 + (pseudo_rand(seed + 8.0) * 4.0) as usize; // 3-6
