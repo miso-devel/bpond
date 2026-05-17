@@ -43,17 +43,17 @@ const DROPLET_SHADOW: (u8, u8, u8) = (40, 75, 40);
 const VEIN_COUNT: f64 = 14.0;
 const VEIN_HALF_WIDTH: f64 = 0.03;
 
-/// Rim bumps — very subtle scalloping. Keep small so the silhouette
-/// reads as a clean circle rather than a wavy blob.
+/// Rim bumps disabled — the silhouette should read as a clean circle.
+/// Variation between pads comes from the notch placement / size instead.
 const RIM_BUMPS: f64 = 7.0;
-const RIM_BUMP_AMP: f64 = 0.03;
-const BREATH_AMP: f64 = 0.03;
+const RIM_BUMP_AMP: f64 = 0.0;
+/// Whole-leaf breathing — very subtle, just enough to feel alive.
+const BREATH_AMP: f64 = 0.015;
 
-/// Notch geometry. The V cut starts at the rim and narrows linearly
-/// toward `NOTCH_INNER_NP`. Tuned conservatively so each pad reads as
-/// "a circle with a small bite missing" rather than a near-bisected leaf.
+/// Notch geometry defaults. Each pad samples small per-pad variation
+/// around these to give individuality without breaking the silhouette.
 const NOTCH_INNER_NP: f64 = 0.65;
-const NOTCH_HALF_WIDTH_MAX: f64 = 0.15; // ≈ 8.6° half-width at the rim
+const NOTCH_HALF_WIDTH_MAX: f64 = 0.15;
 
 /// Sun-lit crescent on the rim.
 const HIGHLIGHT_HALF_WIDTH: f64 = 0.6;
@@ -95,6 +95,12 @@ pub struct LilyPad {
     rotation_rate: f64,
     /// Angle (radians, pad-local frame) where the V-notch points outward.
     notch_angle: f64,
+    /// Per-pad notch depth as a normalized-radius threshold. The V
+    /// extends inward from the rim to this np value; varies slightly
+    /// per pad so each leaf has a slightly different bite.
+    notch_inner_np: f64,
+    /// Per-pad notch half-width at the rim, in radians.
+    notch_half_width: f64,
     /// Angle of the sun-lit highlight crescent (pad-local frame).
     highlight_angle: f64,
     /// Water droplets in pad-local polar coords: `(r_frac, angle)`.
@@ -111,6 +117,8 @@ impl LilyPad {
         rotation: f64,
         rotation_rate: f64,
         notch_angle: f64,
+        notch_inner_np: f64,
+        notch_half_width: f64,
         highlight_angle: f64,
         droplets: Vec<(f64, f64)>,
     ) -> Self {
@@ -126,6 +134,8 @@ impl LilyPad {
             rotation,
             rotation_rate,
             notch_angle,
+            notch_inner_np,
+            notch_half_width,
             highlight_angle,
             droplets,
         }
@@ -218,10 +228,11 @@ impl LilyPad {
                 let local_angle = angle - self.rotation;
 
                 // V-notch cut from the rim toward (but not reaching)
-                // the hub. Widest at the rim, narrowing inward.
-                if np > NOTCH_INNER_NP {
-                    let progress = (np - NOTCH_INNER_NP) / (1.0 - NOTCH_INNER_NP);
-                    let half_w = NOTCH_HALF_WIDTH_MAX * progress;
+                // the hub. Widest at the rim, narrowing inward. Per-pad
+                // depth and width let each leaf have its own bite.
+                if np > self.notch_inner_np {
+                    let progress = (np - self.notch_inner_np) / (1.0 - self.notch_inner_np);
+                    let half_w = self.notch_half_width * progress;
                     if Self::angle_dist(local_angle, self.notch_angle) < half_w {
                         continue;
                     }
@@ -304,17 +315,20 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
         };
         let rotation_rate = rate_mag * rate_sign;
         let notch_angle = pseudo_rand(seed + 6.0) * TAU;
+        // Per-pad notch variation around the defaults — each pad ends
+        // up with a slightly different bite shape.
+        let notch_inner_np = NOTCH_INNER_NP + (pseudo_rand(seed + 10.0) - 0.5) * 0.16; // 0.57–0.73
+        let notch_half_width = NOTCH_HALF_WIDTH_MAX + (pseudo_rand(seed + 11.0) - 0.5) * 0.08; // 0.11–0.19
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
         let droplet_count = 3 + (pseudo_rand(seed + 8.0) * 4.0) as usize; // 3-6
         let mut droplets = Vec::with_capacity(droplet_count);
         for j in 0..droplet_count {
             let ds = seed + 100.0 + j as f64 * 2.3;
             // Keep droplets in the body of the leaf — not in the notch
-            // wedge, not on the rim. Re-roll-cheap by just sampling and
-            // rejecting later angles too close to the notch.
+            // wedge. Re-roll if too close to it.
             let mut a = pseudo_rand(ds) * TAU;
             for _ in 0..4 {
-                if LilyPad::angle_dist(a, notch_angle) > NOTCH_HALF_WIDTH_MAX * 1.2 {
+                if LilyPad::angle_dist(a, notch_angle) > notch_half_width * 1.2 {
                     break;
                 }
                 a = pseudo_rand(ds + a) * TAU;
@@ -330,6 +344,8 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             rotation,
             rotation_rate,
             notch_angle,
+            notch_inner_np,
+            notch_half_width,
             highlight_angle,
             droplets,
         ));
@@ -350,6 +366,8 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            NOTCH_INNER_NP,
+            NOTCH_HALF_WIDTH_MAX,
             PI,
             vec![(0.4, 1.0), (0.5, 3.0)],
         )
@@ -365,7 +383,19 @@ mod tests {
 
     #[test]
     fn radius_stays_within_envelope() {
-        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, 0.0, PI, vec![]);
+        let p = LilyPad::new(
+            0.0,
+            0.0,
+            4.0,
+            1.3,
+            0.5,
+            0.0,
+            0.0,
+            NOTCH_INNER_NP,
+            NOTCH_HALF_WIDTH_MAX,
+            PI,
+            vec![],
+        );
         for i in 0..200 {
             let t = i as f64 * 0.1;
             for j in 0..36 {
@@ -440,7 +470,19 @@ mod tests {
     fn notch_creates_a_gap_on_the_rim() {
         // Pad with notch pointing east. Sample the rim near that angle —
         // pixels in the V wedge should NOT be painted.
-        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, 0.0, PI, vec![]);
+        let p = LilyPad::new(
+            40.0,
+            30.0,
+            6.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            NOTCH_INNER_NP,
+            NOTCH_HALF_WIDTH_MAX,
+            PI,
+            vec![],
+        );
         let mut canvas = Canvas::new(160, 60);
         p.draw(&mut canvas, 2.0, 0.0);
         // Center of canvas approx (80, 60) (pad center px = 40*2=80, 30*2=60).
@@ -459,7 +501,19 @@ mod tests {
 
     #[test]
     fn tick_returns_pad_toward_home_after_displacement() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, 0.0, PI, vec![]);
+        let mut p = LilyPad::new(
+            20.0,
+            15.0,
+            5.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            NOTCH_INNER_NP,
+            NOTCH_HALF_WIDTH_MAX,
+            PI,
+            vec![],
+        );
         p.x = 35.0;
         p.y = 30.0;
         let initial_dist = ((35.0_f64 - 20.0).powi(2) + (30.0_f64 - 15.0).powi(2)).sqrt();
@@ -476,7 +530,19 @@ mod tests {
 
     #[test]
     fn koi_wake_pushes_pad_in_swimming_direction() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, 0.0, PI, vec![]);
+        let mut p = LilyPad::new(
+            20.0,
+            15.0,
+            5.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            NOTCH_INNER_NP,
+            NOTCH_HALF_WIDTH_MAX,
+            PI,
+            vec![],
+        );
         let initial_x = p.x;
         let koi_data = [(18.0_f64, 15.0_f64, 10.0_f64, 0.0_f64)];
         for i in 0..40 {
@@ -491,7 +557,19 @@ mod tests {
 
     #[test]
     fn ambient_current_produces_visible_drift() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, 0.0, PI, vec![]);
+        let mut p = LilyPad::new(
+            20.0,
+            15.0,
+            5.0,
+            0.7,
+            0.0,
+            0.0,
+            0.0,
+            NOTCH_INNER_NP,
+            NOTCH_HALF_WIDTH_MAX,
+            PI,
+            vec![],
+        );
         let mut max_excursion: f64 = 0.0;
         for i in 0..1000 {
             let t = i as f64 * 0.05;
