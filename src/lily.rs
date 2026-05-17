@@ -46,11 +46,15 @@ const RIM_BUMPS: f64 = 7.0;
 const RIM_BUMP_AMP: f64 = 0.0;
 const BREATH_AMP: f64 = 0.0;
 
-/// Pie-slice notch geometry. A single wedge cut from centre to rim,
-/// sized like one piece of a cake cut into 7-12 — natural enough to
-/// read as "a slice taken out" without dominating the silhouette.
+/// Pie-slice notch geometry. A single wedge per pad, sized like one
+/// piece of a cake cut into 7-12, with a random inner depth so some
+/// cuts reach almost to the centre and others stop earlier.
 const SLICE_HW_MIN: f64 = 0.26; // ~30° total
 const SLICE_HW_RANGE: f64 = 0.18; // up to ~50° total
+/// Inner radius (as a fraction of the pad's radius) at which the cut
+/// begins. 0 would mean the slice reaches the very centre.
+const SLICE_INNER_NP_MIN: f64 = 0.10;
+const SLICE_INNER_NP_RANGE: f64 = 0.45;
 
 /// Sun-lit crescent on the rim.
 const HIGHLIGHT_HALF_WIDTH: f64 = 0.6;
@@ -91,8 +95,11 @@ pub struct LilyPad {
     rotation: f64,
     rotation_rate: f64,
     /// Pie-slice cuts in the pad-local frame: each entry is
-    /// `(centre_angle, half_width)` in radians. 1 or 2 slices per pad.
-    notches: Vec<(f64, f64)>,
+    /// `(centre_angle, half_width, inner_np)`. The cut only applies
+    /// where the pixel's normalised radius `np` exceeds `inner_np`,
+    /// so some pads have a slice that reaches almost to the centre
+    /// and others a shallower notch that stops well before it.
+    notches: Vec<(f64, f64, f64)>,
     /// Angle of the sun-lit highlight crescent (pad-local frame).
     highlight_angle: f64,
 }
@@ -106,7 +113,7 @@ impl LilyPad {
         rim_phase: f64,
         rotation: f64,
         rotation_rate: f64,
-        notches: Vec<(f64, f64)>,
+        notches: Vec<(f64, f64, f64)>,
         highlight_angle: f64,
     ) -> Self {
         LilyPad {
@@ -132,7 +139,10 @@ impl LilyPad {
     /// line — but the wobble is bounded so the slice can never balloon
     /// past its base size by more than ~5°.
     fn in_any_notch(&self, local_angle: f64, np: f64) -> bool {
-        for &(center, hw) in &self.notches {
+        for &(center, hw, inner_np) in &self.notches {
+            if np < inner_np {
+                continue;
+            }
             let phase = np * 6.0 + center * 3.1;
             let jitter = phase.sin() * 0.030 + (phase * 2.3 + 0.7).cos() * 0.020;
             if Self::angle_dist(local_angle, center) < hw + jitter {
@@ -289,12 +299,13 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             -1.0
         };
         let rotation_rate = rate_mag * rate_sign;
-        // One pie-slice cut per pad. The angle and size vary, so some
-        // pads show a bigger missing wedge and some smaller, but it's
-        // always a single cut.
+        // One pie-slice cut per pad. The angle, size, and inner depth
+        // all vary — some pads have a slice reaching almost to the
+        // centre, others a shallower notch that stops earlier.
         let slice_angle = pseudo_rand(seed + 11.0) * TAU;
         let slice_hw = SLICE_HW_MIN + pseudo_rand(seed + 12.0) * SLICE_HW_RANGE;
-        let notches = vec![(slice_angle, slice_hw)];
+        let slice_inner = SLICE_INNER_NP_MIN + pseudo_rand(seed + 13.0) * SLICE_INNER_NP_RANGE;
+        let notches = vec![(slice_angle, slice_hw, slice_inner)];
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
         pads.push(LilyPad::new(
             x,
@@ -315,7 +326,7 @@ mod tests {
     use super::*;
 
     fn make_pad() -> LilyPad {
-        LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI)
+        LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI)
     }
 
     #[test]
@@ -328,7 +339,7 @@ mod tests {
 
     #[test]
     fn radius_stays_within_envelope() {
-        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, vec![(0.0, 0.4)], PI);
+        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, vec![(0.0, 0.4, 0.0)], PI);
         for i in 0..200 {
             let t = i as f64 * 0.1;
             for j in 0..36 {
@@ -389,7 +400,7 @@ mod tests {
     fn notch_creates_a_gap_on_the_rim() {
         // Pad with a pie-slice cut pointing east. The rim pixel due
         // east should be inside the slice and therefore unpainted.
-        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI);
+        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
         let mut canvas = Canvas::new(160, 60);
         p.draw(&mut canvas, 2.0, 0.0);
         // Center of canvas approx (80, 60) (pad center px = 40*2=80, 30*2=60).
@@ -408,7 +419,7 @@ mod tests {
 
     #[test]
     fn tick_returns_pad_toward_home_after_displacement() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
         p.x = 35.0;
         p.y = 30.0;
         let initial_dist = ((35.0_f64 - 20.0).powi(2) + (30.0_f64 - 15.0).powi(2)).sqrt();
@@ -425,7 +436,7 @@ mod tests {
 
     #[test]
     fn koi_wake_pushes_pad_in_swimming_direction() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
         let initial_x = p.x;
         let koi_data = [(18.0_f64, 15.0_f64, 10.0_f64, 0.0_f64)];
         for i in 0..40 {
@@ -440,7 +451,7 @@ mod tests {
 
     #[test]
     fn ambient_current_produces_visible_drift() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, vec![(0.0, 0.4)], PI);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, vec![(0.0, 0.4, 0.0)], PI);
         let mut max_excursion: f64 = 0.0;
         for i in 0..1000 {
             let t = i as f64 * 0.05;
