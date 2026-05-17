@@ -56,11 +56,15 @@ cargo run --release
 
 ## How It Works
 
-**Spine**: 40 points chained at fixed distance. Head moves forward, body follows — turns create natural C/S curves.
+**Spine**: 40 points chained at fixed distance. The head moves forward and the body follows; a head-to-tail traveling curvature wave gives each segment a subtle phase-delayed bend, producing the visible tail wagging during cruising and chasing.
 
-**Rendering**: Each terminal cell = 2×4 braille sub-pixels (8× resolution). Body, fins, and tail are drawn as colored dots.
+**Rendering**: Each terminal cell = 2×4 braille sub-pixels (8× resolution). Body, fins, eyes, and tail are drawn as colored dots, with denser sampling across the body and a 3-band gradient so silhouettes anti-alias through canvas-level color averaging.
 
-**Feeding**: Koi detect food, steer with proportional navigation, decelerate on approach, then orbit and nibble.
+**Schooling**: A Boids-style rule (separation, alignment, cohesion) gently pulls idle koi into loose groups. When one koi heads for food, neighbors get curious and trail in — a "follow the leader" reaction familiar from real ponds.
+
+**Feeding**: Koi detect food, steer with proportional navigation on a sharply tuned chase loop (high turn rate, lower forward speed), then decelerate, peck, and nibble with a small orbital wiggle.
+
+**Fins**: Pectoral and pelvic fins each render as a 3-ray fan. While turning, the pectoral fin on the inside extends to brake; the outside fin tucks streamlined. Beat amplitude scales with the current thrust so sprinting and hovering look distinct.
 
 **Effects**: Ripple rings expand from food drops and raindrops. Bubbles rise from the pond floor. Water color shifts through a day/night cycle.
 
@@ -71,7 +75,7 @@ src/
 ├── main.rs       Event loop + rendering
 ├── canvas.rs     Braille sub-pixel canvas
 ├── food.rs       Food pellet lifecycle
-├── koi/          Koi physics + drawing
+├── koi/          Koi physics + drawing (chain dynamics, body wave, schooling)
 ├── pond.rs       Pond state + coordinate math
 ├── ripple.rs     Expanding ring effects
 ├── bubble.rs     Rising bubble particles
