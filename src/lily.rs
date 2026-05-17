@@ -50,9 +50,13 @@ const RIM_BUMP_AMP: f64 = 0.0;
 /// Whole-leaf breathing — very subtle, just enough to feel alive.
 const BREATH_AMP: f64 = 0.015;
 
-/// Notch geometry defaults. Each pad samples small per-pad variation
-/// around these to give individuality without breaking the silhouette.
+/// Notch geometry midpoints, only used by tests. Spawned pads pick a
+/// per-pad "notch size" in [0, 1] which drives both depth and width
+/// together — the only visible difference between pads is whether
+/// their く-notch is big or small.
+#[cfg(test)]
 const NOTCH_INNER_NP: f64 = 0.65;
+#[cfg(test)]
 const NOTCH_HALF_WIDTH_MAX: f64 = 0.15;
 
 /// Sun-lit crescent on the rim.
@@ -301,12 +305,11 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
         let seed = i as f64 * 13.7 + 4.2;
         let x = (0.1 + pseudo_rand(seed) * 0.8) * w;
         let y = (0.1 + pseudo_rand(seed + 1.0) * 0.8) * h;
-        let radius = 5.0 + pseudo_rand(seed + 2.0) * 3.0; // 5–8 world units
+        // Uniform radius — the silhouette is the same circle for every
+        // pad; only the notch differs.
+        let radius = 6.5;
         let rim_phase = pseudo_rand(seed + 3.0) * TAU;
         let rotation = pseudo_rand(seed + 4.0) * TAU;
-        // Rotation rate: 0.10–0.30 rad/s magnitude with random sign.
-        // Floor on magnitude guarantees every pad turns visibly (a full
-        // rotation in 20-60 s) rather than half the pads sitting still.
         let rate_mag = 0.10 + pseudo_rand(seed + 5.0) * 0.20;
         let rate_sign = if pseudo_rand(seed + 9.0) > 0.5 {
             1.0
@@ -315,10 +318,13 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
         };
         let rotation_rate = rate_mag * rate_sign;
         let notch_angle = pseudo_rand(seed + 6.0) * TAU;
-        // Per-pad notch variation around the defaults — each pad ends
-        // up with a slightly different bite shape.
-        let notch_inner_np = NOTCH_INNER_NP + (pseudo_rand(seed + 10.0) - 0.5) * 0.16; // 0.57–0.73
-        let notch_half_width = NOTCH_HALF_WIDTH_MAX + (pseudo_rand(seed + 11.0) - 0.5) * 0.08; // 0.11–0.19
+        // The only meaningful per-pad variation: how big the く-notch
+        // is. A single random "size" parameter drives both depth and
+        // width so the bite scales coherently — some pads have a big
+        // く wedge bitten out of them, others a small one.
+        let notch_size = pseudo_rand(seed + 10.0);
+        let notch_inner_np = 0.85 - notch_size * 0.45; // small bite 0.85 → big bite 0.40
+        let notch_half_width = 0.10 + notch_size * 0.22; // small 0.10 rad → big 0.32 rad
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
         let droplet_count = 3 + (pseudo_rand(seed + 8.0) * 4.0) as usize; // 3-6
         let mut droplets = Vec::with_capacity(droplet_count);
