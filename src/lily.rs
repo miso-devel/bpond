@@ -7,11 +7,9 @@
 //!    or two smaller ones, never removing more than ~40% of the disc.
 //! 2. **Radial veins** spreading out from the hub — typically 12-18
 //!    visible primary veins.
-//! 3. **Water droplets** beading up on the leaf surface (the famous
-//!    "lotus effect" from the leaf's nano-textured wax coating).
-//! 4. A **sunlit crescent** on the rim suggesting the leaf's gentle
+//! 3. A **sunlit crescent** on the rim suggesting the leaf's gentle
 //!    saucer / cup shape and the angle of the light.
-//! 5. **Drift** — pads on a pond aren't static. Wind, currents, and
+//! 4. **Drift** — pads on a pond aren't static. Wind, currents, and
 //!    fish brushing past keep them in continuous motion.
 
 use crate::canvas::Canvas;
@@ -28,8 +26,6 @@ const HUB: (u8, u8, u8) = (28, 55, 30);
 const VEIN: (u8, u8, u8) = (30, 60, 28);
 /// Brighter green along the sun-lit rim crescent.
 const HIGHLIGHT: (u8, u8, u8) = (110, 165, 80);
-/// Lotus-effect water droplets: pale, slightly bluish.
-const DROPLET: (u8, u8, u8) = (175, 220, 200);
 
 // ---------------------------------------------------------------------------
 // Shape parameters
@@ -48,12 +44,12 @@ const BREATH_AMP: f64 = 0.0;
 
 /// Pie-slice notch geometry. A "notch" is an angular wedge cut from
 /// centre to rim — the missing slice of cake. Per-pad variation is
-/// limited to: 1 slice or 2 slices, big or small. The angular sums
-/// below keep the total cut comfortably under ~40% of the disc.
-const SINGLE_SLICE_HW_MIN: f64 = 0.30; // 35° total
-const SINGLE_SLICE_HW_RANGE: f64 = 0.27; // up to ~65° total
-const TWIN_SLICE_HW_MIN: f64 = 0.17; // ~20° total
-const TWIN_SLICE_HW_RANGE: f64 = 0.18; // up to ~40° total each
+/// limited to: 1 slice or 2 slices, big or small. Sizes are tuned to
+/// read as a single missing wedge, not a half-eaten disc.
+const SINGLE_SLICE_HW_MIN: f64 = 0.18; // ~20° total
+const SINGLE_SLICE_HW_RANGE: f64 = 0.18; // up to ~40° total
+const TWIN_SLICE_HW_MIN: f64 = 0.12; // ~14° total each
+const TWIN_SLICE_HW_RANGE: f64 = 0.10; // up to ~25° total each
 
 /// Sun-lit crescent on the rim.
 const HIGHLIGHT_HALF_WIDTH: f64 = 0.6;
@@ -98,8 +94,6 @@ pub struct LilyPad {
     notches: Vec<(f64, f64)>,
     /// Angle of the sun-lit highlight crescent (pad-local frame).
     highlight_angle: f64,
-    /// Water droplets in pad-local polar coords: `(r_frac, angle)`.
-    droplets: Vec<(f64, f64)>,
 }
 
 impl LilyPad {
@@ -113,7 +107,6 @@ impl LilyPad {
         rotation_rate: f64,
         notches: Vec<(f64, f64)>,
         highlight_angle: f64,
-        droplets: Vec<(f64, f64)>,
     ) -> Self {
         LilyPad {
             x,
@@ -128,7 +121,6 @@ impl LilyPad {
             rotation_rate,
             notches,
             highlight_angle,
-            droplets,
         }
     }
 
@@ -218,10 +210,8 @@ impl LilyPad {
 
                 // Pie-slice cut: removes everything inside the angular
                 // wedge from centre to rim, like a slice of cake taken
-                // out. Skip pixels too close to the centre — there's
-                // no meaningful angle at d ≈ 0 and removing the exact
-                // centre pixel would always leave a divot.
-                if d >= 0.5 && self.in_any_notch(local_angle) {
+                // out of the disc.
+                if self.in_any_notch(local_angle) {
                     continue;
                 }
 
@@ -258,18 +248,6 @@ impl LilyPad {
 
                 canvas.dot(cx_px as i32 + dx, cy_px as i32 + dy, r, g, b);
             }
-        }
-
-        // 2) Paint water droplets last so they overlay the leaf body.
-        // Single-pixel beads only — multi-pixel footprints can spill
-        // into the notch wedge or just past the rim.
-        for &(r_frac, drop_angle) in &self.droplets {
-            let abs_angle = drop_angle + self.rotation;
-            let drop_world_x = self.x + r_frac * self.radius * abs_angle.cos();
-            let drop_world_y = self.y + r_frac * self.radius * abs_angle.sin();
-            let px = (drop_world_x * scale) as i32;
-            let py = (drop_world_y * scale) as i32;
-            canvas.dot(px, py, DROPLET.0, DROPLET.1, DROPLET.2);
         }
     }
 }
@@ -318,25 +296,6 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             vec![(a, hw)]
         };
         let highlight_angle = pseudo_rand(seed + 7.0) * TAU;
-        let droplet_count = 3 + (pseudo_rand(seed + 8.0) * 4.0) as usize; // 3-6
-        let mut droplets = Vec::with_capacity(droplet_count);
-        for j in 0..droplet_count {
-            let ds = seed + 100.0 + j as f64 * 2.3;
-            // Re-roll droplet angle until it isn't inside any slice.
-            let mut a = pseudo_rand(ds) * TAU;
-            for _ in 0..6 {
-                if !notches
-                    .iter()
-                    .any(|&(c, hw)| LilyPad::angle_dist(a, c) < hw * 1.2)
-                {
-                    break;
-                }
-                a = pseudo_rand(ds + a) * TAU;
-            }
-            // Keep beads in the inner cup, well clear of the rim.
-            let r_frac = 0.20 + pseudo_rand(ds + 1.0) * 0.20;
-            droplets.push((r_frac, a));
-        }
         pads.push(LilyPad::new(
             x,
             y,
@@ -346,7 +305,6 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
             rotation_rate,
             notches,
             highlight_angle,
-            droplets,
         ));
     }
     pads
@@ -357,17 +315,7 @@ mod tests {
     use super::*;
 
     fn make_pad() -> LilyPad {
-        LilyPad::new(
-            20.0,
-            15.0,
-            5.0,
-            0.0,
-            0.0,
-            0.0,
-            vec![(0.0, 0.4)],
-            PI,
-            vec![(0.3, 1.0), (0.35, 3.0)],
-        )
+        LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI)
     }
 
     #[test]
@@ -380,7 +328,7 @@ mod tests {
 
     #[test]
     fn radius_stays_within_envelope() {
-        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, vec![(0.0, 0.4)], PI, vec![]);
+        let p = LilyPad::new(0.0, 0.0, 4.0, 1.3, 0.5, 0.0, vec![(0.0, 0.4)], PI);
         for i in 0..200 {
             let t = i as f64 * 0.1;
             for j in 0..36 {
@@ -438,24 +386,10 @@ mod tests {
     }
 
     #[test]
-    fn draw_renders_droplets() {
-        let p = make_pad();
-        let mut canvas = Canvas::new(80, 60);
-        p.draw(&mut canvas, 2.0, 0.0);
-        let found = (0..canvas.w)
-            .flat_map(|x| (0..canvas.h).map(move |y| (x, y)))
-            .any(|(x, y)| {
-                let (on, r, g, b) = canvas.get(x, y);
-                on && (r, g, b) == (DROPLET.0, DROPLET.1, DROPLET.2)
-            });
-        assert!(found, "water droplets should be visible");
-    }
-
-    #[test]
     fn notch_creates_a_gap_on_the_rim() {
         // Pad with a pie-slice cut pointing east. The rim pixel due
         // east should be inside the slice and therefore unpainted.
-        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI, vec![]);
+        let p = LilyPad::new(40.0, 30.0, 6.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI);
         let mut canvas = Canvas::new(160, 60);
         p.draw(&mut canvas, 2.0, 0.0);
         // Center of canvas approx (80, 60) (pad center px = 40*2=80, 30*2=60).
@@ -474,7 +408,7 @@ mod tests {
 
     #[test]
     fn tick_returns_pad_toward_home_after_displacement() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI, vec![]);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI);
         p.x = 35.0;
         p.y = 30.0;
         let initial_dist = ((35.0_f64 - 20.0).powi(2) + (30.0_f64 - 15.0).powi(2)).sqrt();
@@ -491,7 +425,7 @@ mod tests {
 
     #[test]
     fn koi_wake_pushes_pad_in_swimming_direction() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI, vec![]);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.0, 0.0, 0.0, vec![(0.0, 0.4)], PI);
         let initial_x = p.x;
         let koi_data = [(18.0_f64, 15.0_f64, 10.0_f64, 0.0_f64)];
         for i in 0..40 {
@@ -506,7 +440,7 @@ mod tests {
 
     #[test]
     fn ambient_current_produces_visible_drift() {
-        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, vec![(0.0, 0.4)], PI, vec![]);
+        let mut p = LilyPad::new(20.0, 15.0, 5.0, 0.7, 0.0, 0.0, vec![(0.0, 0.4)], PI);
         let mut max_excursion: f64 = 0.0;
         for i in 0..1000 {
             let t = i as f64 * 0.05;
