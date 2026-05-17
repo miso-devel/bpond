@@ -32,8 +32,6 @@ const VEIN: (u8, u8, u8) = (30, 60, 28);
 const HIGHLIGHT: (u8, u8, u8) = (110, 165, 80);
 /// Lotus-effect water droplets: pale, slightly bluish.
 const DROPLET: (u8, u8, u8) = (175, 220, 200);
-/// Small darker pixel under each droplet for a touch of contact shadow.
-const DROPLET_SHADOW: (u8, u8, u8) = (40, 75, 40);
 
 // ---------------------------------------------------------------------------
 // Shape parameters
@@ -270,23 +268,15 @@ impl LilyPad {
         }
 
         // 2) Paint water droplets last so they overlay the leaf body.
+        // Single-pixel beads only — multi-pixel footprints can spill
+        // into the notch wedge or just past the rim.
         for &(r_frac, drop_angle) in &self.droplets {
             let abs_angle = drop_angle + self.rotation;
             let drop_world_x = self.x + r_frac * self.radius * abs_angle.cos();
             let drop_world_y = self.y + r_frac * self.radius * abs_angle.sin();
             let px = (drop_world_x * scale) as i32;
             let py = (drop_world_y * scale) as i32;
-            // Subtle 2-pixel droplet with a touch of shadow underneath
-            // for a hint of 3-D bead.
             canvas.dot(px, py, DROPLET.0, DROPLET.1, DROPLET.2);
-            canvas.dot(px + 1, py, DROPLET.0, DROPLET.1, DROPLET.2);
-            canvas.dot(
-                px,
-                py + 1,
-                DROPLET_SHADOW.0,
-                DROPLET_SHADOW.1,
-                DROPLET_SHADOW.2,
-            );
         }
     }
 }
@@ -342,7 +332,9 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
                 }
                 a = pseudo_rand(ds + a) * TAU;
             }
-            let r_frac = 0.20 + pseudo_rand(ds + 1.0) * 0.50;
+            // Keep beads in the inner cup, well clear of the rim and
+            // notch so they can never appear outside the silhouette.
+            let r_frac = 0.20 + pseudo_rand(ds + 1.0) * 0.20;
             droplets.push((r_frac, a));
         }
         pads.push(LilyPad::new(
