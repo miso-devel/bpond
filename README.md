@@ -16,7 +16,7 @@
 
 ---
 
-Koi fish swim with chain-dynamics physics. Click to drop food — they'll chase it. No keyframes, no pre-baked frames. Everything is procedural.
+A living pond in your terminal: koi swim with chain-dynamics physics, lily pads drift on the surface, and frogs sit on the lily pads — breathing, croaking, and leaping. Click to drop food, right-click to scare. No keyframes, no pre-baked frames. Everything is procedural.
 
 ## Install
 
@@ -46,7 +46,7 @@ cargo run --release
 | Input | Action |
 |:---:|--------|
 | Left click | Drop food |
-| Right click | Scare nearby koi |
+| Right click | Scare nearby koi and frogs |
 | `f` | Drop food at a random spot |
 | `+` / `=` | Add a koi |
 | `-` | Remove a koi |
@@ -66,7 +66,11 @@ cargo run --release
 
 **Fins**: Pectoral and pelvic fins each render as a 3-ray fan. While turning, the pectoral fin on the inside extends to brake; the outside fin tucks streamlined. Beat amplitude scales with the current thrust so sprinting and hovering look distinct.
 
-**Effects**: Ripple rings expand from food drops and raindrops. Bubbles rise from the pond floor. Water color shifts through a day/night cycle.
+**Frogs**: A handful of pond frogs sit on the surface, breathing visibly (throat pulse), occasionally croaking with an inflating vocal sac, sometimes flicking a tongue forward. Every few seconds a frog crouches and launches a parabolic-arc leap, landing with a splash — or, if a lily pad is in range, gracefully on top of it. Landing in open water triggers a brief breaststroke swim. Each frog rolls one of three colour morphs (green, olive, brown) at spawn, and right-click sends every frog within range scattering away from the threat.
+
+**Lily pads**: Each pad is a clean disc with a single V-shaped wedge cut from the rim — a random size and depth per pad. Pads drift on the water surface under spring-to-home physics plus per-pad ambient currents, a shared global wind, and the wake of koi and jumping frogs passing nearby.
+
+**Effects**: Ripple rings expand from food drops, raindrops, and frog splashes. Bubbles rise from the pond floor. Water color shifts through a day/night cycle.
 
 ## Architecture
 
@@ -75,7 +79,9 @@ src/
 ├── main.rs       Event loop + rendering
 ├── canvas.rs     Braille sub-pixel canvas
 ├── food.rs       Food pellet lifecycle
+├── frog.rs       Pond frogs: sit / crouch / jump / land / croak / tongue / swim
 ├── koi/          Koi physics + drawing (chain dynamics, body wave, schooling)
+├── lily.rs       Floating lily pads (V-wedge notches + drift physics)
 ├── pond.rs       Pond state + coordinate math
 ├── ripple.rs     Expanding ring effects
 ├── bubble.rs     Rising bubble particles

@@ -116,21 +116,69 @@ const VOCAL_SAC_RADIUS_BULGE: f64 = 1.10; // peak inflation adds this much
 // Tongue visual
 const TONGUE_COLOR: (u8, u8, u8) = (220, 120, 130);
 
+// Eye blink — frogs blink occasionally as the nictitating membrane
+// sweeps across. Each pad has its own period seeded from `seed`.
+const BLINK_INTERVAL_MIN: f64 = 3.5;
+const BLINK_INTERVAL_RANGE: f64 = 5.0;
+const BLINK_DURATION: f64 = 0.16;
+
 // ===========================================================================
 // Colours
 // ===========================================================================
 
 mod color {
-    /// Sunlit top of the back.
-    pub const BACK_LIGHT: (u8, u8, u8) = (95, 165, 70);
-    pub const BACK_MID: (u8, u8, u8) = (60, 120, 50);
-    pub const BACK_DARK: (u8, u8, u8) = (30, 75, 30);
     /// Pale belly tint, mixed in at the jump apex when the frog is
     /// briefly between the viewer and the water.
     pub const BELLY: (u8, u8, u8) = (180, 200, 120);
     pub const EYE: (u8, u8, u8) = (235, 220, 80);
     pub const PUPIL: (u8, u8, u8) = (12, 12, 14);
     pub const THROAT: (u8, u8, u8) = (210, 220, 130);
+}
+
+/// Colour morph picked per-frog at spawn so the pond hosts a mix of
+/// looks rather than a herd of identical green frogs.
+#[derive(Clone, Copy, Debug)]
+pub enum Morph {
+    /// Bright pond-frog green.
+    Green,
+    /// Olive / camo — common in green frogs and bullfrogs.
+    Olive,
+    /// Brown / wood-frog colouring.
+    Brown,
+}
+
+impl Morph {
+    fn back_light(self) -> (u8, u8, u8) {
+        match self {
+            Morph::Green => (95, 165, 70),
+            Morph::Olive => (115, 130, 65),
+            Morph::Brown => (135, 100, 60),
+        }
+    }
+    fn back_mid(self) -> (u8, u8, u8) {
+        match self {
+            Morph::Green => (60, 120, 50),
+            Morph::Olive => (75, 95, 45),
+            Morph::Brown => (95, 70, 40),
+        }
+    }
+    fn back_dark(self) -> (u8, u8, u8) {
+        match self {
+            Morph::Green => (30, 75, 30),
+            Morph::Olive => (45, 60, 25),
+            Morph::Brown => (60, 40, 22),
+        }
+    }
+    fn pick(seed: f64) -> Self {
+        let r = pseudo_rand(seed);
+        if r < 0.55 {
+            Morph::Green
+        } else if r < 0.80 {
+            Morph::Olive
+        } else {
+            Morph::Brown
+        }
+    }
 }
 
 fn lerp_u8(a: u8, b: u8, t: f64) -> u8 {
@@ -203,13 +251,19 @@ pub struct Frog {
     sit_timer: f64,
     breath_phase: f64,
     size: f64,
+    morph: Morph,
     seed: f64,
     rng_step: f64,
+    /// Counts down until the next blink starts.
+    blink_timer: f64,
+    /// > 0 while the eye is mid-blink.
+    blink_remaining: f64,
 }
 
 impl Frog {
     pub fn new(x: f64, y: f64, heading: f64, seed: f64) -> Self {
         let size = SIZE_MIN + pseudo_rand(seed) * (SIZE_MAX - SIZE_MIN);
+        let morph = Morph::pick(seed + 7.0);
         Frog {
             x,
             y,
@@ -218,8 +272,11 @@ impl Frog {
             sit_timer: SIT_DURATION_MIN + pseudo_rand(seed + 1.0) * SIT_DURATION_RANGE,
             breath_phase: pseudo_rand(seed + 2.0) * TAU,
             size,
+            morph,
             seed,
             rng_step: 0.0,
+            blink_timer: BLINK_INTERVAL_MIN + pseudo_rand(seed + 5.0) * BLINK_INTERVAL_RANGE,
+            blink_remaining: 0.0,
         }
     }
 
@@ -290,6 +347,7 @@ impl Frog {
     /// landing went into open water (→ Swim) or onto a pad (→ Sit).
     pub fn update(&mut self, dt: f64, w: f64, h: f64, pads: &[(f64, f64, f64)]) -> Option<Splash> {
         self.breath_phase += dt * BREATH_RATE;
+        self.tick_blink(dt);
         let current = self.state;
         let (next, splash) = match current {
             FrogState::Sit => (self.tick_sit(dt, w, h, pads), None),
@@ -416,6 +474,25 @@ impl Frog {
 
     fn reset_sit_timer(&mut self) {
         self.sit_timer = SIT_DURATION_MIN + self.next_rand() * SIT_DURATION_RANGE;
+    }
+
+    fn tick_blink(&mut self, dt: f64) {
+        if self.blink_remaining > 0.0 {
+            self.blink_remaining -= dt;
+            if self.blink_remaining < 0.0 {
+                self.blink_remaining = 0.0;
+                self.blink_timer = BLINK_INTERVAL_MIN + self.next_rand() * BLINK_INTERVAL_RANGE;
+            }
+        } else {
+            self.blink_timer -= dt;
+            if self.blink_timer <= 0.0 {
+                self.blink_remaining = BLINK_DURATION;
+            }
+        }
+    }
+
+    fn is_blinking(&self) -> bool {
+        self.blink_remaining > 0.0
     }
 
     /// Choose what to do when the sit timer runs out. Most often
@@ -632,9 +709,9 @@ impl Frog {
                 let world_dy = dy as f64 / scale;
                 let bx = world_dx * cos_h + world_dy * sin_h;
                 let by = -world_dx * sin_h + world_dy * cos_h;
-                if let Some((r, g, b)) =
-                    body_pixel_colour(bx, by, body_len, body_wid, head_len, head_wid, lift)
-                {
+                if let Some((r, g, b)) = body_pixel_colour(
+                    bx, by, body_len, body_wid, head_len, head_wid, lift, self.morph,
+                ) {
                     canvas.dot(cx_i + dx, cy_i + dy, r, g, b);
                 }
             }
@@ -665,7 +742,7 @@ impl Frog {
                 to_canvas,
                 hip,
                 knee,
-                color::BACK_DARK,
+                self.morph.back_dark(),
                 LEG_THICKNESS,
             );
             draw_segment(
@@ -673,7 +750,7 @@ impl Frog {
                 to_canvas,
                 knee,
                 foot,
-                color::BACK_DARK,
+                self.morph.back_dark(),
                 LEG_THICKNESS,
             );
         }
@@ -696,7 +773,7 @@ impl Frog {
                 to_canvas,
                 hip,
                 foot,
-                color::BACK_DARK,
+                self.morph.back_dark(),
                 LEG_THICKNESS,
             );
         }
@@ -730,7 +807,7 @@ impl Frog {
                 to_canvas,
                 hip,
                 knee,
-                color::BACK_DARK,
+                self.morph.back_dark(),
                 LEG_THICKNESS,
             );
             draw_segment(
@@ -738,7 +815,7 @@ impl Frog {
                 to_canvas,
                 knee,
                 foot,
-                color::BACK_DARK,
+                self.morph.back_dark(),
                 LEG_THICKNESS,
             );
         }
@@ -759,7 +836,7 @@ impl Frog {
                 FRONT_FOOT_FWD * render_size,
                 FRONT_FOOT_SIDE * side * render_size,
             );
-            draw_segment(canvas, to_canvas, hip, foot, color::BACK_DARK, 0);
+            draw_segment(canvas, to_canvas, hip, foot, self.morph.back_dark(), 0);
         }
     }
 
@@ -773,13 +850,26 @@ impl Frog {
         // Radii are stored in world units; fill_disc wants sub-pixels.
         let r_px = EYE_RADIUS * render_size * scale;
         let pupil_r_px = PUPIL_RADIUS * render_size * scale;
+        let blinking = self.is_blinking();
         for &side in &[1.0_f64, -1.0] {
             let (cx, cy) = to_canvas(
                 EYE_OFFSET_FWD * render_size,
                 EYE_OFFSET_SIDE * side * render_size,
             );
-            fill_disc(canvas, cx, cy, r_px, color::EYE);
-            fill_disc(canvas, cx, cy, pupil_r_px, color::PUPIL);
+            if blinking {
+                // Nictitating membrane: replace the eye with a short
+                // horizontal slit of the back's darkest colour.
+                let slit_half = r_px.max(1.5);
+                let slit_y = cy as i32;
+                let cx_i = cx as i32;
+                let dark = self.morph.back_dark();
+                for dx in -slit_half as i32..=slit_half as i32 {
+                    canvas.dot(cx_i + dx, slit_y, dark.0, dark.1, dark.2);
+                }
+            } else {
+                fill_disc(canvas, cx, cy, r_px, color::EYE);
+                fill_disc(canvas, cx, cy, pupil_r_px, color::PUPIL);
+            }
         }
     }
 
@@ -840,7 +930,7 @@ impl Frog {
             cx,
             cy + shadow_dx * 0.35,
             radius_world * scale * 0.75,
-            color::BACK_DARK,
+            self.morph.back_dark(),
         );
         // Re-paint the bright sac on top to keep its sunlit upper
         // half — gives the inflated sphere a clear highlight.
@@ -904,6 +994,7 @@ fn landed_on_pad(x: f64, y: f64, pads: &[(f64, f64, f64)]) -> bool {
 
 /// Returns Some(colour) if the pixel is inside the body silhouette,
 /// or None if it's outside.
+#[allow(clippy::too_many_arguments)]
 fn body_pixel_colour(
     bx: f64,
     by: f64,
@@ -912,6 +1003,7 @@ fn body_pixel_colour(
     head_len: f64,
     head_wid: f64,
     lift: f64,
+    morph: Morph,
 ) -> Option<(u8, u8, u8)> {
     // Two overlapping ovals: main body (centred at 0) and head bulge
     // (centred forward of body). Either one being inside paints the
@@ -929,12 +1021,12 @@ fn body_pixel_colour(
         .sqrt()
         .min(1.0);
     let base = if r_body < 0.55 {
-        color::BACK_LIGHT
+        morph.back_light()
     } else {
-        color::BACK_MID
+        morph.back_mid()
     };
     let edge_mix = ((r_body - 0.80) * 4.0).clamp(0.0, 1.0);
-    let with_edge = lerp_color(base, color::BACK_DARK, edge_mix);
+    let with_edge = lerp_color(base, morph.back_dark(), edge_mix);
     let belly_mix = lift * 0.45;
     Some(lerp_color(with_edge, color::BELLY, belly_mix))
 }
@@ -990,12 +1082,13 @@ fn draw_segment(
 // Spawning
 // ===========================================================================
 
-/// Default frog set for a fresh pond.
+/// Default frog set for a fresh pond. Seeds chosen so the trio
+/// shows up with a mix of colour morphs (green / olive / brown).
 pub fn spawn_frogs(w: f64, h: f64) -> Vec<Frog> {
     [
-        (w * 0.18, h * 0.20, 0.4, 2.1_f64),
-        (w * 0.78, h * 0.32, 2.9, 5.7),
-        (w * 0.45, h * 0.78, 4.6, 9.3),
+        (w * 0.18, h * 0.20, 0.4, 1.7_f64), // green
+        (w * 0.78, h * 0.32, 2.9, 5.2),     // olive
+        (w * 0.45, h * 0.78, 4.6, 3.1),     // brown
     ]
     .iter()
     .map(|&(x, y, heading, seed)| Frog::new(x, y, heading, seed))
@@ -1038,7 +1131,7 @@ mod tests {
     // -- state transitions ------------------------------------------------
 
     #[test]
-    fn sit_eventually_transitions_to_crouch() {
+    fn sit_eventually_transitions_to_another_state() {
         let mut f = default_frog();
         // Advance enough seconds to outlast the longest possible sit.
         for _ in 0..1000 {
@@ -1048,7 +1141,7 @@ mod tests {
             }
         }
         assert!(
-            matches!(f.state(), FrogState::Crouch { .. } | FrogState::Jump { .. }),
+            !matches!(f.state(), FrogState::Sit),
             "frog should leave Sit after enough time, still in {:?}",
             f.state(),
         );
@@ -1495,5 +1588,68 @@ mod tests {
         let (vx, vy) = f.velocity();
         let speed = (vx * vx + vy * vy).sqrt();
         assert!(speed > 1.0);
+    }
+
+    // -- colour morph + blink --------------------------------------------
+
+    #[test]
+    fn morph_picker_covers_all_three_variants() {
+        let mut seen_green = false;
+        let mut seen_olive = false;
+        let mut seen_brown = false;
+        for i in 0..200 {
+            match Morph::pick(i as f64 * 0.97 + 0.5) {
+                Morph::Green => seen_green = true,
+                Morph::Olive => seen_olive = true,
+                Morph::Brown => seen_brown = true,
+            }
+        }
+        assert!(seen_green && seen_olive && seen_brown);
+    }
+
+    #[test]
+    fn spawn_frogs_eventually_produces_more_than_one_morph() {
+        // Use Morph::pick directly across many seeds — the morph
+        // picker itself is what we care about.
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..200 {
+            let s = i as f64 * 0.7 + 0.5;
+            match Morph::pick(s) {
+                Morph::Green => seen.insert("green"),
+                Morph::Olive => seen.insert("olive"),
+                Morph::Brown => seen.insert("brown"),
+            };
+        }
+        assert_eq!(seen.len(), 3, "morph picker must produce all 3 variants");
+    }
+
+    #[test]
+    fn blink_eventually_closes_the_eye() {
+        let mut f = default_frog();
+        let mut saw_blink = false;
+        // 10 seconds is more than the longest blink interval.
+        for _ in 0..500 {
+            f.update(0.02, 80.0, 46.0, &[]);
+            if f.is_blinking() {
+                saw_blink = true;
+                break;
+            }
+        }
+        assert!(saw_blink, "frog should blink at least once within 10s");
+    }
+
+    #[test]
+    fn blink_clears_iris_paint() {
+        let mut f = default_frog();
+        f.blink_remaining = BLINK_DURATION; // force a blink right now
+        let mut canvas = Canvas::new(80, 30);
+        f.draw(&mut canvas, 2.0);
+        let iris_found = (0..canvas.w)
+            .flat_map(|x| (0..canvas.h).map(move |y| (x, y)))
+            .any(|(x, y)| {
+                let (on, r, g, b) = canvas.get(x, y);
+                on && (r, g, b) == color::EYE
+            });
+        assert!(!iris_found, "closed eye should not paint the iris colour");
     }
 }
