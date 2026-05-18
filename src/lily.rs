@@ -300,9 +300,10 @@ pub fn spawn_pads(w: f64, h: f64) -> Vec<LilyPad> {
         let seed = i as f64 * 13.7 + 4.2;
         let x = (0.1 + pseudo_rand(seed) * 0.8) * w;
         let y = (0.1 + pseudo_rand(seed + 1.0) * 0.8) * h;
-        // Uniform radius — the silhouette is the same circle for every
-        // pad; only the notch differs.
-        let radius = 6.5;
+        // Vary radius per pad so the cluster doesn't read as a row of
+        // identical coins. Small ones look like young leaves, larger
+        // ones like mature pads.
+        let radius = 4.5 + pseudo_rand(seed + 2.0) * 4.0; // ~4.5–8.5 world units
         let rim_phase = pseudo_rand(seed + 3.0) * TAU;
         let rotation = pseudo_rand(seed + 4.0) * TAU;
         let rate_mag = 0.10 + pseudo_rand(seed + 5.0) * 0.20;
