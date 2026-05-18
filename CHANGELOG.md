@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-05-18
+
+A "pond, not just koi" release. The pond now actually looks like one:
+green lotus pads float on the surface, drift on the water, and react
+to the koi swimming past.
+
+### Added
+- **Lotus pads** (`src/lily.rs`): each pad is a clean circular disc
+  with a single V-shaped wedge cut from the rim. Per-pad randomness
+  in radius, rotation, wedge size, wedge depth, and wedge angle, so
+  no two pads look the same.
+- **Pad drift physics**: spring-to-home + damping + per-pad ambient
+  sinusoid + shared global wind + koi-wake nudges. Pads continuously
+  jostle and rotate; a koi swimming past pushes the pads near it.
+- **`Koi::velocity()`** public accessor, so the lily-pad layer can
+  sample each koi's swim velocity for wake forces.
+- **`Pond::lilies`** populated in `Pond::new`, ticked from
+  `Pond::update`, and drawn last each frame so swimming koi are
+  occluded where they pass under a pad.
+- Extensive lily-pad test coverage, including a regression test that
+  every spawned pad keeps at least 40% of its disc painted (the
+  user-facing "still recognisable as a leaf" invariant) and a fix
+  for a long-latent `angle_dist` bug that could let the wedge eat
+  most of a pad when its rotation exceeded π.
+
+### Changed
+- Pad rendering uses a strict circle silhouette (rim never extends
+  past its base radius) and a brighter green palette so leaves are
+  clearly distinguishable from the dark blue water.
+
 ## [0.4.0] — 2026-05-06
 
 A "lifelike koi" release. Visually the rendering core (braille,
