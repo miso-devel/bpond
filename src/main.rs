@@ -115,7 +115,7 @@ fn main() -> Result<()> {
                     if let MouseEventKind::Down(MouseButton::Right) = m.kind {
                         let scale = pond::compute_scale(tw, th);
                         let (fx, fy) = pond::screen_to_world(m.column, m.row, scale);
-                        pond.scare(fx, fy);
+                        pond.scare(fx, fy, tw as f64, world_h);
                     }
                 }
                 _ => {}

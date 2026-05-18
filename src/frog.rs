@@ -63,12 +63,18 @@ const FRONT_FOOT_SIDE: f64 = 0.90;
 const SIT_DURATION_MIN: f64 = 3.0;
 const SIT_DURATION_RANGE: f64 = 5.0; // → 3-8 seconds
 const CROUCH_DURATION: f64 = 0.18;
+const SCARED_CROUCH_DURATION: f64 = 0.07; // scared frogs barely pause
 const JUMP_DURATION: f64 = 0.55;
 const LAND_DURATION: f64 = 0.32;
+const CROAK_DURATION: f64 = 1.8;
+const CROAK_PULSE_RATE: f64 = 2.6; // Hz — about 4-5 pulses per croak
+const TONGUE_DURATION: f64 = 0.18; // fast — real frogs are even faster
+const TONGUE_REACH: f64 = 2.40; // world units forward of nose at peak
 
 // Per-leap range
 const JUMP_DISTANCE_MIN: f64 = 5.5;
 const JUMP_DISTANCE_RANGE: f64 = 11.0;
+const SCARED_JUMP_DISTANCE: f64 = 18.0; // big jump away from the threat
 const JUMP_LIFT_SCALE: f64 = 0.40; // body grows this fraction at apex
 
 // Breathing (throat pulse)
@@ -83,6 +89,23 @@ const EDGE_MARGIN: f64 = 3.0;
 
 // Splash impulse the pond layer uses to spawn ripples on landing.
 pub const LANDING_SPLASH_FORCE: f64 = 1.0;
+
+// Scare reaction range: frogs farther than this from the threat
+// ignore it. Inside this radius they immediately launch.
+const SCARE_RANGE: f64 = 14.0;
+
+// Action probabilities at the end of a Sit period.
+const ACTION_TONGUE_THRESHOLD: f64 = 0.10; // [0, 0.10) → flick
+const ACTION_CROAK_THRESHOLD: f64 = 0.35; // [0.10, 0.35) → croak
+                                          //                                                   [0.35, 1.00) → jump
+
+// Vocal sac visual (drawn during Croak).
+const VOCAL_SAC_FWD: f64 = 1.10;
+const VOCAL_SAC_RADIUS_BASE: f64 = 0.55;
+const VOCAL_SAC_RADIUS_BULGE: f64 = 1.10; // peak inflation adds this much
+
+// Tongue visual
+const TONGUE_COLOR: (u8, u8, u8) = (220, 120, 130);
 
 // ===========================================================================
 // Colours
@@ -145,6 +168,12 @@ pub enum FrogState {
     },
     /// Just landed — body compressed, recovering for `remaining` seconds.
     Land { remaining: f64 },
+    /// Inflating and deflating the vocal sac under the chin in a
+    /// rhythmic pulse. The frog stays put. `pulse_phase` ticks at
+    /// `CROAK_PULSE_RATE` so the sac inflates a few times per croak.
+    Croak { remaining: f64, pulse_phase: f64 },
+    /// Tongue snaps out forward and retracts. Very brief.
+    TongueFlick { remaining: f64 },
 }
 
 // ===========================================================================
@@ -246,22 +275,7 @@ impl Frog {
         self.breath_phase += dt * BREATH_RATE;
         let current = self.state;
         let (next, splash) = match current {
-            FrogState::Sit => {
-                self.sit_timer -= dt;
-                if self.sit_timer <= 0.0 {
-                    let (tx, ty, hd) = self.choose_jump_target(w, h);
-                    self.heading = hd;
-                    (
-                        FrogState::Crouch {
-                            remaining: CROUCH_DURATION,
-                            target: (tx, ty),
-                        },
-                        None,
-                    )
-                } else {
-                    (FrogState::Sit, None)
-                }
-            }
+            FrogState::Sit => (self.tick_sit(dt, w, h), None),
             FrogState::Crouch {
                 mut remaining,
                 target,
@@ -307,15 +321,105 @@ impl Frog {
             FrogState::Land { mut remaining } => {
                 remaining -= dt;
                 if remaining <= 0.0 {
-                    self.sit_timer = SIT_DURATION_MIN + self.next_rand() * SIT_DURATION_RANGE;
+                    self.reset_sit_timer();
                     (FrogState::Sit, None)
                 } else {
                     (FrogState::Land { remaining }, None)
                 }
             }
+            FrogState::Croak {
+                mut remaining,
+                mut pulse_phase,
+            } => {
+                remaining -= dt;
+                pulse_phase += dt * CROAK_PULSE_RATE;
+                if remaining <= 0.0 {
+                    self.reset_sit_timer();
+                    (FrogState::Sit, None)
+                } else {
+                    (
+                        FrogState::Croak {
+                            remaining,
+                            pulse_phase,
+                        },
+                        None,
+                    )
+                }
+            }
+            FrogState::TongueFlick { mut remaining } => {
+                remaining -= dt;
+                if remaining <= 0.0 {
+                    self.reset_sit_timer();
+                    (FrogState::Sit, None)
+                } else {
+                    (FrogState::TongueFlick { remaining }, None)
+                }
+            }
         };
         self.state = next;
         splash
+    }
+
+    fn reset_sit_timer(&mut self) {
+        self.sit_timer = SIT_DURATION_MIN + self.next_rand() * SIT_DURATION_RANGE;
+    }
+
+    /// Choose what to do when the sit timer runs out. Most often
+    /// the frog jumps; sometimes it croaks; occasionally it flicks
+    /// its tongue.
+    fn tick_sit(&mut self, dt: f64, w: f64, h: f64) -> FrogState {
+        self.sit_timer -= dt;
+        if self.sit_timer > 0.0 {
+            return FrogState::Sit;
+        }
+        let roll = self.next_rand();
+        if roll < ACTION_TONGUE_THRESHOLD {
+            FrogState::TongueFlick {
+                remaining: TONGUE_DURATION,
+            }
+        } else if roll < ACTION_CROAK_THRESHOLD {
+            FrogState::Croak {
+                remaining: CROAK_DURATION,
+                pulse_phase: 0.0,
+            }
+        } else {
+            let (tx, ty, hd) = self.choose_jump_target(w, h);
+            self.heading = hd;
+            FrogState::Crouch {
+                remaining: CROUCH_DURATION,
+                target: (tx, ty),
+            }
+        }
+    }
+
+    /// Make this frog jump immediately away from `(sx, sy)` if the
+    /// threat is within `SCARE_RANGE`. Does nothing if the frog is
+    /// already airborne — interrupting a Jump mid-flight would look
+    /// like a teleport.
+    pub fn scare(&mut self, sx: f64, sy: f64, w: f64, h: f64) {
+        if matches!(self.state, FrogState::Jump { .. }) {
+            return;
+        }
+        let dx = self.x - sx;
+        let dy = self.y - sy;
+        let dist = (dx * dx + dy * dy).sqrt();
+        if dist > SCARE_RANGE {
+            return;
+        }
+        let away = if dist < 0.01 {
+            self.next_rand() * TAU
+        } else {
+            dy.atan2(dx)
+        };
+        let raw_tx = self.x + away.cos() * SCARED_JUMP_DISTANCE;
+        let raw_ty = self.y + away.sin() * SCARED_JUMP_DISTANCE;
+        let tx = raw_tx.clamp(EDGE_MARGIN, (w - EDGE_MARGIN).max(EDGE_MARGIN));
+        let ty = raw_ty.clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
+        self.heading = (ty - self.y).atan2(tx - self.x);
+        self.state = FrogState::Crouch {
+            remaining: SCARED_CROUCH_DURATION,
+            target: (tx, ty),
+        };
     }
 
     fn choose_jump_target(&mut self, w: f64, h: f64) -> (f64, f64, f64) {
@@ -368,13 +472,32 @@ impl Frog {
         self.draw_front_legs(canvas, &to_canvas, render_size);
         self.draw_eyes(canvas, &to_canvas, render_size, scale);
 
-        // Throat pulse only while sitting — too subtle to bother with
-        // during the other states.
-        if matches!(self.state, FrogState::Sit) {
-            let bulge = (self.breath_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-            if bulge > 0.30 {
-                self.draw_throat(canvas, &to_canvas, render_size, bulge);
+        // State-specific overlays.
+        match self.state {
+            FrogState::Sit => {
+                // Subtle breath pulse during Sit.
+                let bulge = (self.breath_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                if bulge > 0.30 {
+                    self.draw_throat(canvas, &to_canvas, render_size, bulge);
+                }
             }
+            FrogState::Croak { pulse_phase, .. } => {
+                // Big inflating vocal sac. Even at its smallest the
+                // sac is bigger than the resting throat so the croak
+                // reads as a different beat.
+                let pulse = (pulse_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                self.draw_vocal_sac(canvas, &to_canvas, render_size, scale, pulse);
+            }
+            FrogState::TongueFlick { remaining } => {
+                let progress = 1.0 - (remaining / TONGUE_DURATION);
+                let extension = if progress < 0.5 {
+                    progress * 2.0
+                } else {
+                    (1.0 - progress) * 2.0
+                };
+                self.draw_tongue(canvas, &to_canvas, render_size, extension);
+            }
+            _ => {}
         }
     }
 
@@ -556,6 +679,75 @@ impl Frog {
             by += step;
         }
     }
+
+    fn draw_vocal_sac(
+        &self,
+        canvas: &mut Canvas,
+        to_canvas: &impl Fn(f64, f64) -> (f64, f64),
+        render_size: f64,
+        scale: f64,
+        pulse: f64,
+    ) {
+        // The sac is a disc that pokes forward and down from under
+        // the chin. Its radius pulses with the croak rhythm.
+        let radius_world = (VOCAL_SAC_RADIUS_BASE + VOCAL_SAC_RADIUS_BULGE * pulse) * render_size;
+        // Place its centre just forward of the chin; it grows
+        // forward as it inflates.
+        let fwd = (VOCAL_SAC_FWD + 0.55 * pulse) * render_size;
+        let (cx, cy) = to_canvas(fwd, 0.0);
+        fill_disc(canvas, cx, cy, radius_world * scale, color::THROAT);
+        // A subtle shadow line under the sac to give it volume.
+        let shadow_dx = (radius_world * 0.55) * scale;
+        fill_disc(
+            canvas,
+            cx,
+            cy + shadow_dx * 0.35,
+            radius_world * scale * 0.75,
+            color::BACK_DARK,
+        );
+        // Re-paint the bright sac on top to keep its sunlit upper
+        // half — gives the inflated sphere a clear highlight.
+        fill_disc(
+            canvas,
+            cx,
+            cy - shadow_dx * 0.10,
+            radius_world * scale * 0.65,
+            color::THROAT,
+        );
+    }
+
+    fn draw_tongue(
+        &self,
+        canvas: &mut Canvas,
+        to_canvas: &impl Fn(f64, f64) -> (f64, f64),
+        render_size: f64,
+        extension: f64,
+    ) {
+        if extension <= 0.0 {
+            return;
+        }
+        let nose_fwd = (EYE_OFFSET_FWD + 0.40) * render_size;
+        let tip_fwd = nose_fwd + TONGUE_REACH * render_size * extension;
+        let from = (nose_fwd, 0.0);
+        let to = (tip_fwd, 0.0);
+        draw_segment(canvas, to_canvas, from, to, TONGUE_COLOR, 0);
+        // Small bulb at the tip.
+        let (tx, ty) = to_canvas(to.0, to.1);
+        canvas.dot(
+            tx as i32,
+            ty as i32,
+            TONGUE_COLOR.0,
+            TONGUE_COLOR.1,
+            TONGUE_COLOR.2,
+        );
+        canvas.dot(
+            tx as i32 + 1,
+            ty as i32,
+            TONGUE_COLOR.0,
+            TONGUE_COLOR.1,
+            TONGUE_COLOR.2,
+        );
+    }
 }
 
 // ===========================================================================
@@ -715,39 +907,43 @@ mod tests {
     }
 
     #[test]
-    fn full_cycle_passes_through_every_state() {
-        // Force a transition by zeroing the sit timer then drive the
-        // simulation long enough to observe each state in turn.
+    fn full_jump_cycle_passes_through_every_state() {
+        // Drop directly into Crouch so we deterministically exercise
+        // the jump path (Sit's action roll could otherwise pick
+        // Croak or TongueFlick instead). After landing the frog
+        // transitions back into Sit, but the next action roll might
+        // launch into another non-Sit state quickly — so just verify
+        // we passed through each phase, not the final state.
         let mut f = default_frog();
-        f.sit_timer = 0.0;
-        let mut saw_crouch = false;
+        f.state = FrogState::Crouch {
+            remaining: CROUCH_DURATION,
+            target: (30.0, 20.0),
+        };
+        f.heading = 0.0;
+
         let mut saw_jump = false;
         let mut saw_land = false;
-        let mut saw_sit_again = false;
-        // ~3 seconds at 20 ms / tick. One full cycle is
-        // crouch(0.18) + jump(0.55) + land(0.32) ≈ 1.05 s; the next
-        // sit timer is 3–8 s, so we may or may not see a second cycle.
-        let mut land_seen_tick = None;
-        for i in 0..150 {
+        let mut saw_sit_after_landing = false;
+        let mut landed = false;
+        // 2 seconds is plenty: crouch(0.18) + jump(0.55) + land(0.32) ≈ 1.05.
+        for _ in 0..100 {
             f.update(0.02, 80.0, 46.0);
             match f.state() {
-                FrogState::Crouch { .. } => saw_crouch = true,
                 FrogState::Jump { .. } => saw_jump = true,
                 FrogState::Land { .. } => {
                     saw_land = true;
-                    land_seen_tick = Some(i);
+                    landed = true;
                 }
-                FrogState::Sit => {
-                    if land_seen_tick.is_some() {
-                        saw_sit_again = true;
-                    }
-                }
+                FrogState::Sit if landed => saw_sit_after_landing = true,
+                _ => {}
             }
         }
-        assert!(saw_crouch, "frog should enter Crouch");
-        assert!(saw_jump, "frog should enter Jump");
-        assert!(saw_land, "frog should enter Land");
-        assert!(saw_sit_again, "frog should return to Sit after landing");
+        assert!(saw_jump, "frog should pass through Jump");
+        assert!(saw_land, "frog should pass through Land");
+        assert!(
+            saw_sit_after_landing,
+            "frog should return to Sit after landing",
+        );
     }
 
     #[test]
@@ -772,11 +968,19 @@ mod tests {
     fn jump_target_stays_inside_pond() {
         let w = 80.0;
         let h = 46.0;
-        // Start a frog near each corner and force jumps; landing
-        // must stay inside [EDGE_MARGIN, w - EDGE_MARGIN].
-        for &(sx, sy) in &[(2.0, 2.0), (78.0, 2.0), (2.0, 44.0), (78.0, 44.0)] {
+        // Start each frog just inside the margin and force jumps;
+        // landings must stay inside [EDGE_MARGIN, w - EDGE_MARGIN].
+        // Croak / TongueFlick rolls don't move the frog so the
+        // starting position must already satisfy the bounds.
+        for &(sx, sy) in &[
+            (EDGE_MARGIN + 0.1, EDGE_MARGIN + 0.1),
+            (w - EDGE_MARGIN - 0.1, EDGE_MARGIN + 0.1),
+            (EDGE_MARGIN + 0.1, h - EDGE_MARGIN - 0.1),
+            (w - EDGE_MARGIN - 0.1, h - EDGE_MARGIN - 0.1),
+        ] {
             let mut f = Frog::new(sx, sy, 0.0, sx + sy);
             for _ in 0..30 {
+                // Force-decide an action by zeroing the sit timer.
                 f.sit_timer = 0.0;
                 for _ in 0..200 {
                     f.update(0.02, w, h);
@@ -867,5 +1071,151 @@ mod tests {
             assert!(x > 0.0 && x < w);
             assert!(y > 0.0 && y < h);
         }
+    }
+
+    // -- croak / tongue --------------------------------------------------
+
+    #[test]
+    fn croak_state_resolves_back_to_sit() {
+        let mut f = default_frog();
+        f.state = FrogState::Croak {
+            remaining: CROAK_DURATION,
+            pulse_phase: 0.0,
+        };
+        for _ in 0..((CROAK_DURATION / 0.02) as usize + 20) {
+            f.update(0.02, 80.0, 46.0);
+        }
+        assert!(
+            matches!(f.state(), FrogState::Sit),
+            "after CROAK_DURATION the frog must return to Sit, got {:?}",
+            f.state(),
+        );
+    }
+
+    #[test]
+    fn croak_does_not_move_the_frog() {
+        let mut f = default_frog();
+        let (x0, y0) = f.position();
+        f.state = FrogState::Croak {
+            remaining: CROAK_DURATION,
+            pulse_phase: 0.0,
+        };
+        for _ in 0..((CROAK_DURATION / 0.02) as usize) {
+            f.update(0.02, 80.0, 46.0);
+        }
+        let (x1, y1) = f.position();
+        assert!((x1 - x0).abs() < 1e-9 && (y1 - y0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn croak_draw_paints_a_visible_vocal_sac() {
+        let mut f = default_frog();
+        f.state = FrogState::Croak {
+            remaining: CROAK_DURATION,
+            pulse_phase: std::f64::consts::FRAC_PI_2, // peak of sin → max bulge
+        };
+        let mut canvas = Canvas::new(80, 30);
+        f.draw(&mut canvas, 2.0);
+        let lit = (0..canvas.w)
+            .flat_map(|x| (0..canvas.h).map(move |y| (x, y)))
+            .filter(|&(x, y)| {
+                let (on, r, g, b) = canvas.get(x, y);
+                on && (r, g, b) == color::THROAT
+            })
+            .count();
+        assert!(
+            lit > 5,
+            "croak should paint a sizeable throat-coloured vocal sac, got {lit}",
+        );
+    }
+
+    #[test]
+    fn tongue_flick_resolves_back_to_sit() {
+        let mut f = default_frog();
+        f.state = FrogState::TongueFlick {
+            remaining: TONGUE_DURATION,
+        };
+        for _ in 0..30 {
+            f.update(0.02, 80.0, 46.0);
+        }
+        assert!(matches!(f.state(), FrogState::Sit));
+    }
+
+    #[test]
+    fn tongue_flick_draw_paints_tongue_colour() {
+        let mut f = default_frog();
+        f.state = FrogState::TongueFlick {
+            remaining: TONGUE_DURATION * 0.5, // peak extension
+        };
+        let mut canvas = Canvas::new(80, 30);
+        f.draw(&mut canvas, 2.0);
+        let found = (0..canvas.w)
+            .flat_map(|x| (0..canvas.h).map(move |y| (x, y)))
+            .any(|(x, y)| {
+                let (on, r, g, b) = canvas.get(x, y);
+                on && (r, g, b) == TONGUE_COLOR
+            });
+        assert!(found, "tongue colour should be visible during the flick");
+    }
+
+    // -- scare ------------------------------------------------------------
+
+    #[test]
+    fn scare_inside_range_triggers_crouch_jump() {
+        let mut f = Frog::new(20.0, 15.0, 0.0, 3.0);
+        // Sit normally — but scared from very close.
+        f.scare(19.0, 14.0, 80.0, 46.0);
+        assert!(matches!(f.state(), FrogState::Crouch { .. }));
+        // Resolving the crouch should put the frog into a Jump.
+        for _ in 0..30 {
+            f.update(0.02, 80.0, 46.0);
+            if matches!(f.state(), FrogState::Jump { .. }) {
+                return;
+            }
+        }
+        panic!(
+            "scared frog should reach Jump quickly, ended in {:?}",
+            f.state()
+        );
+    }
+
+    #[test]
+    fn scare_outside_range_is_ignored() {
+        let mut f = Frog::new(20.0, 15.0, 0.0, 4.0);
+        let before = f.state();
+        f.scare(70.0, 45.0, 80.0, 46.0);
+        assert!(
+            matches!(before, FrogState::Sit) && matches!(f.state(), FrogState::Sit),
+            "distant scare should leave the frog alone",
+        );
+    }
+
+    #[test]
+    fn scare_aims_jump_away_from_threat() {
+        let mut f = Frog::new(40.0, 23.0, 0.0, 5.0);
+        f.scare(35.0, 23.0, 80.0, 46.0); // threat to the west
+        match f.state() {
+            FrogState::Crouch { target, .. } => {
+                assert!(
+                    target.0 > 40.0,
+                    "scared frog should target east of its current x, got target=({:.1},{:.1})",
+                    target.0,
+                    target.1,
+                );
+            }
+            other => panic!("expected Crouch after scare, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scare_during_jump_does_not_interrupt() {
+        let mut f = default_frog();
+        f.state = FrogState::Jump {
+            from: (20.0, 15.0),
+            to: (30.0, 20.0),
+            progress: 0.3,
+        };
+        f.scare(20.0, 15.0, 80.0, 46.0);
+        assert!(matches!(f.state(), FrogState::Jump { .. }));
     }
 }

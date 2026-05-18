@@ -131,9 +131,12 @@ impl Pond {
         self.ripples.push(Ripple::new(x, y, 22.0, 3.5));
     }
 
-    pub fn scare(&mut self, x: f64, y: f64) {
+    pub fn scare(&mut self, x: f64, y: f64, w: f64, h: f64) {
         for fish in &mut self.fish {
             fish.scare(x, y);
+        }
+        for fr in &mut self.frogs {
+            fr.scare(x, y, w, h);
         }
     }
 
@@ -343,13 +346,13 @@ mod new_feature_tests {
     #[test]
     fn pond_scare_does_not_panic() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.scare(40.0, 23.0);
+        pond.scare(40.0, 23.0, 80.0, 46.0);
     }
 
     #[test]
     fn pond_scare_activates_all_fish() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.scare(0.0, 0.0);
+        pond.scare(0.0, 0.0, 80.0, 46.0);
         for (i, fish) in pond.fish.iter().enumerate() {
             assert!(
                 fish.scare_timer > 0.0,
