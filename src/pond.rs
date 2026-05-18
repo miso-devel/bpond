@@ -3,6 +3,7 @@
 use crate::bubble::Bubble;
 use crate::food::{Food, EAT_RANGE_SQ};
 use crate::koi::Koi;
+use crate::lily::{spawn_pads, LilyPad};
 use crate::rain::RainSystem;
 use crate::ripple::Ripple;
 use crate::rng::pseudo_rand;
@@ -12,6 +13,7 @@ pub struct Pond {
     pub foods: Vec<Food>,
     pub ripples: Vec<Ripple>,
     pub bubbles: Vec<Bubble>,
+    pub lilies: Vec<LilyPad>,
     pub rain: RainSystem,
     pub rain_mode: bool,
     bubble_spawn_timer: f64,
@@ -30,6 +32,7 @@ impl Pond {
             foods: Vec::new(),
             ripples: Vec::new(),
             bubbles: Vec::new(),
+            lilies: spawn_pads(w, h),
             rain: RainSystem::new(),
             rain_mode: false,
             bubble_spawn_timer: 1.0,
@@ -65,6 +68,22 @@ impl Pond {
             r.tick(dt);
         }
         self.ripples.retain(|r| r.is_alive());
+
+        // Lily pads drift with ambient current and pick up wake from
+        // any nearby koi. Collect (x, y, vx, vy) per fish — the lily
+        // tick reads it without aliasing fish.
+        let koi_data: Vec<(f64, f64, f64, f64)> = self
+            .fish
+            .iter()
+            .map(|k| {
+                let (kx, ky) = k.head();
+                let (kvx, kvy) = k.velocity();
+                (kx, ky, kvx, kvy)
+            })
+            .collect();
+        for pad in &mut self.lilies {
+            pad.tick(dt, t, &koi_data);
+        }
 
         self.bubble_spawn_timer -= dt;
         if self.bubble_spawn_timer <= 0.0 {

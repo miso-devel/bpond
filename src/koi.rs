@@ -163,6 +163,13 @@ impl Koi {
         (self.spine_x[0], self.spine_y[0], self.heading)
     }
 
+    /// Current world-space velocity vector (heading × speed × burst).
+    /// Used by floating debris like lily pads to feel the koi's wake.
+    pub fn velocity(&self) -> (f64, f64) {
+        let v = self.speed * self.burst;
+        (self.heading.cos() * v, self.heading.sin() * v)
+    }
+
     pub fn scare(&mut self, x: f64, y: f64) {
         self.scare_timer = 2.0;
         self.scare_from_x = x;
