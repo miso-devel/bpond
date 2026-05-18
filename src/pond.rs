@@ -73,9 +73,10 @@ impl Pond {
         self.ripples.retain(|r| r.is_alive());
 
         // Lily pads drift with ambient current and pick up wake from
-        // any nearby koi. Collect (x, y, vx, vy) per fish — the lily
-        // tick reads it without aliasing fish.
-        let koi_data: Vec<(f64, f64, f64, f64)> = self
+        // any nearby koi or jumping frog. Collect (x, y, vx, vy)
+        // per actor — the lily tick reads it without aliasing the
+        // other lists.
+        let mut actor_wake: Vec<(f64, f64, f64, f64)> = self
             .fish
             .iter()
             .map(|k| {
@@ -84,14 +85,21 @@ impl Pond {
                 (kx, ky, kvx, kvy)
             })
             .collect();
+        for fr in &self.frogs {
+            let (fx, fy) = fr.position();
+            let (vx, vy) = fr.velocity();
+            actor_wake.push((fx, fy, vx, vy));
+        }
         for pad in &mut self.lilies {
-            pad.tick(dt, t, &koi_data);
+            pad.tick(dt, t, &actor_wake);
         }
 
-        // Frogs sit, breathe, and occasionally leap. A leap that
-        // lands spawns a small triple-ring ripple to read as a splash.
+        // Snapshot lily pad positions so frogs can prefer landing on
+        // them and skip the Swim phase when they do.
+        let pad_snapshots: Vec<(f64, f64, f64)> =
+            self.lilies.iter().map(|p| p.snapshot()).collect();
         for fr in &mut self.frogs {
-            if let Some(splash) = fr.update(dt, w, h) {
+            if let Some(splash) = fr.update(dt, w, h, &pad_snapshots) {
                 let f = splash.force;
                 self.ripples
                     .push(Ripple::new(splash.x, splash.y, 6.0 * f, 1.2));

@@ -163,6 +163,13 @@ impl LilyPad {
         (self.vx, self.vy)
     }
 
+    /// Snapshot of `(x, y, radius)` for other actors that need to
+    /// reason about pad positions without holding a borrow of the
+    /// pond.
+    pub fn snapshot(&self) -> (f64, f64, f64) {
+        (self.x, self.y, self.radius)
+    }
+
     // -- physics --------------------------------------------------------
 
     pub fn tick(&mut self, dt: f64, t: f64, koi_data: &[(f64, f64, f64, f64)]) {
