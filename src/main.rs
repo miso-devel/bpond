@@ -1,6 +1,7 @@
 mod bubble;
 mod canvas;
 mod food;
+mod frog;
 mod koi;
 mod lily;
 mod pond;
@@ -73,6 +74,10 @@ fn main() -> Result<()> {
             // overlap.
             for pad in &pond.lilies {
                 pad.draw(&mut canvas, scale, elapsed);
+            }
+            // Frogs sit on top of the pads / water.
+            for fr in &pond.frogs {
+                fr.draw(&mut canvas, scale);
             }
             if debug {
                 canvas.render(buf, 0, 1, area);

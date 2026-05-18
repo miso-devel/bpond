@@ -2,6 +2,7 @@
 
 use crate::bubble::Bubble;
 use crate::food::{Food, EAT_RANGE_SQ};
+use crate::frog::{spawn_frogs, Frog};
 use crate::koi::Koi;
 use crate::lily::{spawn_pads, LilyPad};
 use crate::rain::RainSystem;
@@ -14,6 +15,7 @@ pub struct Pond {
     pub ripples: Vec<Ripple>,
     pub bubbles: Vec<Bubble>,
     pub lilies: Vec<LilyPad>,
+    pub frogs: Vec<Frog>,
     pub rain: RainSystem,
     pub rain_mode: bool,
     bubble_spawn_timer: f64,
@@ -33,6 +35,7 @@ impl Pond {
             ripples: Vec::new(),
             bubbles: Vec::new(),
             lilies: spawn_pads(w, h),
+            frogs: spawn_frogs(w, h),
             rain: RainSystem::new(),
             rain_mode: false,
             bubble_spawn_timer: 1.0,
@@ -83,6 +86,20 @@ impl Pond {
             .collect();
         for pad in &mut self.lilies {
             pad.tick(dt, t, &koi_data);
+        }
+
+        // Frogs sit, breathe, and occasionally leap. A leap that
+        // lands spawns a small triple-ring ripple to read as a splash.
+        for fr in &mut self.frogs {
+            if let Some(splash) = fr.update(dt, w, h) {
+                let f = splash.force;
+                self.ripples
+                    .push(Ripple::new(splash.x, splash.y, 6.0 * f, 1.2));
+                self.ripples
+                    .push(Ripple::new(splash.x, splash.y, 11.0 * f, 1.9));
+                self.ripples
+                    .push(Ripple::new(splash.x, splash.y, 16.0 * f, 2.6));
+            }
         }
 
         self.bubble_spawn_timer -= dt;
@@ -346,6 +363,10 @@ mod new_feature_tests {
     #[test]
     fn ripples_are_removed_when_dead() {
         let mut pond = Pond::new(80.0, 46.0);
+        // Remove frogs — their leap splashes would spawn fresh
+        // ripples during the long simulation window and mask the
+        // invariant under test.
+        pond.frogs.clear();
         pond.drop_food(40.0, 23.0);
         assert_eq!(pond.ripples.len(), 3);
 
