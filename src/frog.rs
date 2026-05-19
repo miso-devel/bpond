@@ -115,7 +115,9 @@ const FLOAT_DURATION_RANGE: f64 = 4.0; // 2-6 seconds of idle floating
 const SWIM_KICK_DURATION: f64 = 0.62; // one full stroke cycle
 const SWIM_STROKE_RATE: f64 = 1.5; // strokes per second
 const SWIM_PEAK_SPEED: f64 = 5.0; // peak forward speed during recovery
-const FLOAT_DRIFT_AMP: f64 = 0.30; // tiny bob amplitude (wu) for idle Float
+const FLOAT_DRIFT_AMP: f64 = 0.30; // tiny vertical bob amplitude (wu)
+const FLOAT_GLIDE_SPEED: f64 = 0.45; // very slow forward drift while idling
+const FLOAT_HEADING_WANDER: f64 = 0.12; // rad/s peak heading drift while idling
 
 // Action probabilities at the end of a Float period.
 const FLOAT_ACTION_KICK_THRESHOLD: f64 = 0.45; // [0, 0.45) → SwimKick
@@ -520,10 +522,17 @@ impl Frog {
             }
             FrogState::Float { mut remaining } => {
                 remaining -= dt;
-                // Tiny ambient bob so the frog isn't perfectly
-                // glued to the water.
+                // Subtle ambient motion: tiny vertical bob, a very
+                // slow forward glide, and a sine heading wander so
+                // the frog never sits perfectly still in the water.
                 let bob = self.breath_phase.sin() * FLOAT_DRIFT_AMP * dt;
-                self.y = (self.y + bob).clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
+                let glide_dx = self.heading.cos() * FLOAT_GLIDE_SPEED * dt;
+                let glide_dy = self.heading.sin() * FLOAT_GLIDE_SPEED * dt;
+                let wander = (self.breath_phase * 0.5).cos() * FLOAT_HEADING_WANDER * dt;
+                self.heading += wander;
+                self.x = (self.x + glide_dx).clamp(EDGE_MARGIN, (w - EDGE_MARGIN).max(EDGE_MARGIN));
+                self.y = (self.y + glide_dy + bob)
+                    .clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
                 if remaining <= 0.0 {
                     self.tick_float_action(w, h, pads)
                 } else {
@@ -543,17 +552,25 @@ impl Frog {
                 let drift_dy = self.heading.sin() * speed * dt;
                 self.x = (self.x + drift_dx).clamp(EDGE_MARGIN, (w - EDGE_MARGIN).max(EDGE_MARGIN));
                 self.y = (self.y + drift_dy).clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
-                // Emit one wake ripple per stroke as the legs sweep
-                // back together (stroke_phase passes π). Spawn it
-                // about one body-length behind the frog.
+                // Emit two wake ripples per kick — a larger one as
+                // the legs sweep back together (stroke_phase passes
+                // π), and a small trailing one when the kick winds
+                // down. Both are spawned about a body-length behind
+                // the frog.
+                let trail = 1.6 * self.size;
+                let behind_x = self.x - self.heading.cos() * trail;
+                let behind_y = self.y - self.heading.sin() * trail;
                 if prev_phase < PI && stroke_phase >= PI {
-                    let trail = 1.6 * self.size;
                     events.push(FrogEvent::Wake {
-                        x: self.x - self.heading.cos() * trail,
-                        y: self.y - self.heading.sin() * trail,
+                        x: behind_x,
+                        y: behind_y,
                     });
                 }
                 if remaining <= 0.0 {
+                    events.push(FrogEvent::Wake {
+                        x: behind_x,
+                        y: behind_y,
+                    });
                     FrogState::Float {
                         remaining: self.float_duration(),
                     }
