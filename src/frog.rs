@@ -39,19 +39,23 @@ const THROAT_FWD: f64 = 1.00;
 const THROAT_HALF_WID: f64 = 0.55;
 
 // Hind-leg joints (sitting / folded Z shape). Negative `fwd` = behind body centre.
+// Lengths are pushed out compared to a typical compact pose so the
+// powerful hind legs read clearly even at small render sizes.
 const HIP_FWD: f64 = -1.05;
 const HIP_SIDE: f64 = 0.95;
-const KNEE_FWD: f64 = -2.35;
-const KNEE_SIDE: f64 = 1.90;
-const FOOT_FWD: f64 = -0.55;
-const FOOT_SIDE: f64 = 1.90;
+const KNEE_FWD: f64 = -2.80;
+const KNEE_SIDE: f64 = 2.30;
+const FOOT_FWD: f64 = -0.20;
+const FOOT_SIDE: f64 = 2.30;
 const LEG_THICKNESS: i32 = 1;
 
-// Hind-leg joints during a jump (extended straight back).
+// Hind-leg joints during a jump (extended straight back). The toes
+// reach well past the body so the leap looks like a real
+// hind-leg-driven launch.
 const EXT_HIP_FWD: f64 = -1.05;
-const EXT_HIP_SIDE: f64 = 0.60;
-const EXT_FOOT_FWD: f64 = -3.55;
-const EXT_FOOT_SIDE: f64 = 0.85;
+const EXT_HIP_SIDE: f64 = 0.65;
+const EXT_FOOT_FWD: f64 = -4.85;
+const EXT_FOOT_SIDE: f64 = 1.05;
 
 // Front leg geometry — small, peeks out from under the chin.
 const FRONT_HIP_FWD: f64 = 1.10;
@@ -89,9 +93,10 @@ const JUMP_LIFT_SCALE: f64 = 0.40; // body grows this fraction at apex
 // Breathing (throat pulse)
 const BREATH_RATE: f64 = 1.4;
 
-// Per-frog size variation
-const SIZE_MIN: f64 = 0.85;
-const SIZE_MAX: f64 = 1.15;
+// Per-frog size variation. Centred slightly above 1.0 so the frogs
+// read clearly at terminal scale even when the lily pads are small.
+const SIZE_MIN: f64 = 1.05;
+const SIZE_MAX: f64 = 1.35;
 
 // Bounds margin so frogs don't spawn or land on the literal edge.
 const EDGE_MARGIN: f64 = 3.0;
