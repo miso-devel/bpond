@@ -37,8 +37,8 @@ const WEDGE_INNER_NP_MAX: f64 = 0.65;
 /// (radians). Bounded so the cut can never balloon by more.
 const WEDGE_JITTER_AMP: f64 = 0.05;
 
-const RADIUS_MIN: f64 = 4.5;
-const RADIUS_MAX: f64 = 8.5;
+const RADIUS_MIN: f64 = 3.5;
+const RADIUS_MAX: f64 = 6.5;
 
 const ROTATION_RATE_MIN: f64 = 0.10;
 const ROTATION_RATE_MAX: f64 = 0.30;
