@@ -534,7 +534,15 @@ impl Frog {
                 self.y = (self.y + glide_dy + bob)
                     .clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
                 if remaining <= 0.0 {
-                    self.tick_float_action(w, h, pads)
+                    let next = self.tick_float_action(w, h, pads);
+                    // Pushing off the water surface throws a wake.
+                    if matches!(next, FrogState::Crouch { .. }) {
+                        events.push(FrogEvent::Wake {
+                            x: self.x,
+                            y: self.y,
+                        });
+                    }
+                    next
                 } else {
                     FrogState::Float { remaining }
                 }
