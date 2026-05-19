@@ -66,10 +66,12 @@ const VOCAL_SAC_RADIUS_BULGE: f64 = 1.10;
 const TONGUE_COLOR: (u8, u8, u8) = (220, 120, 130);
 const TONGUE_REACH: f64 = 2.40; // world units forward of nose at peak
 
-/// Underwater body tint — pixels mix toward this while the frog is
-/// floating or kicking, so the body reads as submerged.
-const SUBMERGED_TINT: (u8, u8, u8) = (18, 32, 48);
-const SUBMERGED_MIX: f64 = 0.62;
+/// Cool tint applied to the frog body while it is in water. Kept
+/// deliberately subtle: just enough that the swimming frog reads
+/// slightly cooler than a pad-sitting frog, while preserving its
+/// natural green so it still stands out against the water.
+const SUBMERGED_TINT: (u8, u8, u8) = (40, 70, 110);
+const SUBMERGED_MIX: f64 = 0.20;
 
 mod color {
     /// Pale belly tint, mixed in at the jump apex when the frog is

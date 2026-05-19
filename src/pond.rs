@@ -119,22 +119,17 @@ impl Pond {
             }
         }
 
-        // Mark each lily pad as occupied if a resting frog is
-        // currently sitting on it. The pad uses this to darken
-        // toward the water palette so the frog reads clearly on top.
-        const OCCUPY_THRESHOLD: f64 = 0.85;
-        for pad in &mut self.lilies {
-            let (px, py, pr) = pad.snapshot();
-            let occupied = self.frogs.iter().any(|fr| {
-                if !fr.is_resting() {
-                    return false;
-                }
-                let (fx, fy) = fr.position();
-                let dx = fx - px;
-                let dy = fy - py;
-                (dx * dx + dy * dy).sqrt() < pr * OCCUPY_THRESHOLD
-            });
-            pad.set_occupied(occupied);
+        // Mark each lily pad as occupied if a frog is currently
+        // anchored to it. Frogs carry an `on_pad` index that's the
+        // single source of truth — no distance check needed, so the
+        // result stays accurate even while pads drift.
+        let occupied_pads: std::collections::HashSet<usize> = self
+            .frogs
+            .iter()
+            .filter_map(|fr| fr.perched_pad())
+            .collect();
+        for (i, pad) in self.lilies.iter_mut().enumerate() {
+            pad.set_occupied(occupied_pads.contains(&i));
         }
 
         self.bubble_spawn_timer -= dt;
@@ -527,19 +522,24 @@ mod new_feature_tests {
     // -- pad occupancy ------------------------------------------------------
 
     #[test]
-    fn pad_under_resting_frog_is_marked_occupied() {
+    fn pads_under_spawned_frogs_are_marked_occupied() {
+        // spawn_frogs perches frog `i` onto pad `i`. After one tick
+        // the occupancy pass should reflect that exactly.
         let mut pond = Pond::new(80.0, 46.0);
-        // Park a frog right on top of the first pad and clear the
-        // others so they can't accidentally satisfy the predicate.
-        let (px, py, _) = pond.lilies[0].snapshot();
-        pond.frogs.clear();
-        pond.frogs.push(crate::frog::Frog::new(px, py, 0.0, 1.7));
-        // Tick once so the occupancy pass runs.
         pond.update(0.05, 0.0, 80.0, 46.0);
-        assert!(
-            pond.lilies[0].is_occupied(),
-            "pad with a sitting frog on it should be marked occupied",
-        );
+        let frog_count = pond.frogs.len();
+        for i in 0..frog_count {
+            assert!(
+                pond.lilies[i].is_occupied(),
+                "pad #{i} should be occupied by frog #{i}",
+            );
+        }
+        for (i, pad) in pond.lilies.iter().enumerate().skip(frog_count) {
+            assert!(
+                !pad.is_occupied(),
+                "pad #{i} (beyond frog count) should not be occupied",
+            );
+        }
     }
 
     #[test]

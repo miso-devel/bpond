@@ -62,8 +62,10 @@ const TONGUE_DURATION: f64 = 0.18; // fast — real frogs are even faster
 //   • Crouch → Jump — try to leave the water, usually onto a pad.
 //
 // Crouch / Jump from water reuse the existing jump pipeline.
-const FLOAT_DURATION_MIN: f64 = 2.0;
-const FLOAT_DURATION_RANGE: f64 = 4.0; // 2-6 seconds of idle floating
+// Float idles are short — frogs in water actively swim most of
+// the time. After a kick they only briefly catch their breath.
+const FLOAT_DURATION_MIN: f64 = 1.0;
+const FLOAT_DURATION_RANGE: f64 = 2.5; // 1-3.5 seconds between actions
 const SWIM_KICK_DURATION: f64 = 0.62; // one full stroke cycle
 const SWIM_STROKE_RATE: f64 = 1.5; // strokes per second
 const SWIM_PEAK_SPEED: f64 = 5.0; // peak forward speed during recovery
@@ -71,10 +73,16 @@ const FLOAT_DRIFT_AMP: f64 = 0.30; // tiny vertical bob amplitude (wu)
 const FLOAT_GLIDE_SPEED: f64 = 0.45; // very slow forward drift while idling
 const FLOAT_HEADING_WANDER: f64 = 0.12; // rad/s peak heading drift while idling
 
-// Action probabilities at the end of a Float period.
-const FLOAT_ACTION_KICK_THRESHOLD: f64 = 0.45; // [0, 0.45) → SwimKick
-const FLOAT_ACTION_REST_THRESHOLD: f64 = 0.80; // [0.45, 0.80) → another Float
-                                               //                                                  [0.80, 1.00) → Crouch + Jump
+// Action probabilities at the end of a Float period. Strongly biased
+// toward kicking — a real pond frog in water swims actively rather
+// than holding still for long stretches.
+//
+// A frog in water never jumps randomly. The "pad-jump" slot below is
+// only spent if there is a reachable lily pad to aim at; otherwise
+// it falls back to one more SwimKick.
+const FLOAT_ACTION_KICK_THRESHOLD: f64 = 0.75; // [0, 0.75) → SwimKick
+const FLOAT_ACTION_REST_THRESHOLD: f64 = 0.85; // [0.75, 0.85) → another Float
+                                               //                                                  [0.85, 1.00) → try a pad-jump
 
 // Lily-pad preference for jump targeting.
 const PAD_PREFERENCE: f64 = 0.65; // chance to aim at a pad if one is reachable
@@ -232,6 +240,13 @@ pub struct Frog {
     blink_timer: f64,
     /// > 0 while the eye is mid-blink.
     blink_remaining: f64,
+    /// Index of the lily pad this frog is currently perched on, or
+    /// `None` if it's in open water / airborne. While set, the frog
+    /// is "glued" to that pad — every tick its position is synced
+    /// to the pad's centre, so if the pad drifts the frog drifts
+    /// with it. The field is the single source of truth for "is
+    /// this frog on a pad?".
+    on_pad: Option<usize>,
 }
 
 impl Frog {
@@ -251,6 +266,7 @@ impl Frog {
             rng_step: 0.0,
             blink_timer: BLINK_INTERVAL_MIN + pseudo_rand(seed + 5.0) * BLINK_INTERVAL_RANGE,
             blink_remaining: 0.0,
+            on_pad: None,
         }
     }
 
@@ -270,19 +286,11 @@ impl Frog {
         }
     }
 
-    /// True when the frog is at rest on a solid surface — i.e.
-    /// on a lily pad, not floating in water and not airborne.
-    /// Pond uses this together with a position check to decide
-    /// which pads to tint with the "occupied" palette.
-    pub fn is_resting(&self) -> bool {
-        matches!(
-            self.state,
-            FrogState::Sit
-                | FrogState::Crouch { .. }
-                | FrogState::Land { .. }
-                | FrogState::Croak { .. }
-                | FrogState::TongueFlick { .. }
-        )
+    /// Index of the pad the frog is perched on, if any. Pond uses
+    /// this directly to tint that exact pad — no distance check,
+    /// no chance of drift desync.
+    pub fn perched_pad(&self) -> Option<usize> {
+        self.on_pad
     }
 
     /// True when the frog is currently in water (floating or kicking).
@@ -351,6 +359,23 @@ impl Frog {
     pub fn update(&mut self, dt: f64, w: f64, h: f64, pads: &[(f64, f64, f64)]) -> Vec<FrogEvent> {
         self.breath_phase += dt * BREATH_RATE;
         self.tick_blink(dt);
+        // Stay glued to whichever pad we're perched on. If that pad
+        // has vanished (extremely unlikely but defensive), drop into
+        // Float so we don't keep claiming to sit on nothing.
+        if let Some(idx) = self.on_pad {
+            match pads.get(idx) {
+                Some(&(px, py, _)) => {
+                    self.x = px;
+                    self.y = py;
+                }
+                None => {
+                    self.on_pad = None;
+                    self.state = FrogState::Float {
+                        remaining: self.float_duration(),
+                    };
+                }
+            }
+        }
         let mut events: Vec<FrogEvent> = Vec::new();
         let next = match self.state {
             FrogState::Sit => self.tick_sit(dt, w, h, pads),
@@ -360,6 +385,8 @@ impl Frog {
             } => {
                 remaining -= dt;
                 if remaining <= 0.0 {
+                    // Leaving the pad — clear the glue.
+                    self.on_pad = None;
                     FrogState::Jump {
                         from: (self.x, self.y),
                         to: target,
@@ -378,11 +405,15 @@ impl Frog {
                 if progress >= 1.0 {
                     self.x = to.0;
                     self.y = to.1;
-                    let on_pad = landed_on_pad(to.0, to.1, pads);
+                    self.on_pad = pad_at(to.0, to.1, pads);
                     events.push(FrogEvent::Splash {
                         x: to.0,
                         y: to.1,
-                        force: if on_pad { 0.5 } else { LANDING_SPLASH_FORCE },
+                        force: if self.on_pad.is_some() {
+                            0.5
+                        } else {
+                            LANDING_SPLASH_FORCE
+                        },
                     });
                     FrogState::Land {
                         remaining: LAND_DURATION,
@@ -398,7 +429,7 @@ impl Frog {
                     // immediately. Water landings drop the frog into
                     // Float so it idles with submerged posture and
                     // can choose to swim or jump out later.
-                    if landed_on_pad(self.x, self.y, pads) {
+                    if self.on_pad.is_some() {
                         self.reset_sit_timer();
                         FrogState::Sit
                     } else {
@@ -517,21 +548,35 @@ impl Frog {
     fn tick_float_action(&mut self, w: f64, h: f64, pads: &[(f64, f64, f64)]) -> FrogState {
         let roll = self.next_rand();
         if roll < FLOAT_ACTION_KICK_THRESHOLD {
-            FrogState::SwimKick {
-                remaining: SWIM_KICK_DURATION,
-                stroke_phase: 0.0,
-            }
+            self.swim_kick()
         } else if roll < FLOAT_ACTION_REST_THRESHOLD {
             FrogState::Float {
                 remaining: self.float_duration(),
             }
         } else {
-            let (tx, ty, hd) = self.choose_jump_target(w, h, pads);
-            self.heading = hd;
-            FrogState::Crouch {
-                remaining: CROUCH_DURATION,
-                target: (tx, ty),
+            // A frog in water never jumps somewhere random — it only
+            // leaps when it can clearly land on a pad. If no pad is
+            // reachable, fall back to another kick.
+            let max_dist = JUMP_DISTANCE_MIN + JUMP_DISTANCE_RANGE;
+            match self.pick_pad_target(pads, max_dist) {
+                Some((tx, ty)) => {
+                    let tx = tx.clamp(EDGE_MARGIN, (w - EDGE_MARGIN).max(EDGE_MARGIN));
+                    let ty = ty.clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
+                    self.heading = (ty - self.y).atan2(tx - self.x);
+                    FrogState::Crouch {
+                        remaining: CROUCH_DURATION,
+                        target: (tx, ty),
+                    }
+                }
+                None => self.swim_kick(),
             }
+        }
+    }
+
+    fn swim_kick(&self) -> FrogState {
+        FrogState::SwimKick {
+            remaining: SWIM_KICK_DURATION,
+            stroke_phase: 0.0,
         }
     }
 
@@ -672,11 +717,11 @@ impl Frog {
 // Free helpers
 // ===========================================================================
 
-/// True if `(x, y)` falls inside any of the lily pads listed in
-/// `pads`. "Inside" means within `PAD_LAND_THRESHOLD * radius`, so
-/// the frog has to land near the centre — not just clip the rim.
-fn landed_on_pad(x: f64, y: f64, pads: &[(f64, f64, f64)]) -> bool {
-    pads.iter().any(|&(px, py, pr)| {
+/// Index of the lily pad `(x, y)` is currently inside, if any.
+/// "Inside" means within `PAD_LAND_THRESHOLD * radius` — the frog
+/// has to land near the centre, not just clip the rim.
+fn pad_at(x: f64, y: f64, pads: &[(f64, f64, f64)]) -> Option<usize> {
+    pads.iter().position(|&(px, py, pr)| {
         let dx = x - px;
         let dy = y - py;
         (dx * dx + dy * dy).sqrt() < pr * PAD_LAND_THRESHOLD
@@ -701,7 +746,11 @@ pub fn spawn_frogs(pads: &[(f64, f64, f64)]) -> Vec<Frog> {
         .enumerate()
         .map(|(i, &(heading, seed))| {
             if let Some(&(px, py, _)) = pads.get(i) {
-                Frog::new(px, py, heading, seed)
+                let mut f = Frog::new(px, py, heading, seed);
+                // Glue the spawn-on-pad frog to that pad so it
+                // follows it from frame zero.
+                f.on_pad = Some(i);
+                f
             } else {
                 // No pad to perch on — drop the frog in water near
                 // the centre and let it start in Float.
@@ -1167,6 +1216,83 @@ mod tests {
             !matches!(f.state(), FrogState::Sit),
             "Float should not return to Sit, got {:?}",
             f.state(),
+        );
+    }
+
+    #[test]
+    fn floating_frog_never_jumps_when_no_pad_is_reachable() {
+        // A water frog must never jump into the void. With an empty
+        // pad list the action roll's "pad-jump" slot has to fall
+        // back to a SwimKick.
+        let mut f = default_frog();
+        f.state = FrogState::Float { remaining: 0.0 };
+        f.x = 40.0;
+        f.y = 23.0;
+        for _ in 0..400 {
+            f.update(0.02, 80.0, 46.0, &[]);
+            assert!(
+                !matches!(
+                    f.state(),
+                    FrogState::Crouch { .. } | FrogState::Jump { .. } | FrogState::Land { .. }
+                ),
+                "frog in water with no pad in range must not jump, got {:?}",
+                f.state(),
+            );
+        }
+    }
+
+    #[test]
+    fn floating_frog_with_a_pad_in_range_eventually_aims_at_it() {
+        // Pin the frog at a known position each tick (otherwise
+        // SwimKick drift will eventually take it out of pad-jump
+        // range). With the float countdown re-armed every frame and
+        // the ~15% pad-jump slot, the frog should converge quickly.
+        let mut f = default_frog();
+        let pads = [(42.0, 30.0, 3.5)];
+        f.state = FrogState::Float { remaining: 0.0 };
+        for _ in 0..2000 {
+            f.x = 30.0;
+            f.y = 30.0;
+            f.heading = 0.0;
+            f.update(0.02, 80.0, 46.0, &pads);
+            if let FrogState::Crouch { target, .. } = f.state() {
+                assert!(
+                    (target.0 - pads[0].0).abs() < 0.5 && (target.1 - pads[0].1).abs() < 0.5,
+                    "crouch target {target:?} should match the pad centre {:?}",
+                    (pads[0].0, pads[0].1),
+                );
+                return;
+            }
+            // Re-arm the float countdown so the action roll fires
+            // again immediately (kick or pad-jump).
+            if let FrogState::Float { remaining } = &mut f.state {
+                if *remaining > 0.0 {
+                    *remaining = 0.0;
+                }
+            }
+        }
+        panic!("frog should eventually jump toward the in-range pad");
+    }
+
+    #[test]
+    fn perched_frog_follows_pad_drift() {
+        // A frog with `on_pad` set should track the pad's position
+        // each frame, so detection stays accurate even if the pad
+        // drifts.
+        let mut f = default_frog();
+        f.x = 20.0;
+        f.y = 15.0;
+        f.on_pad = Some(0);
+        // First tick: pad at the original position.
+        f.update(0.02, 80.0, 46.0, &[(20.0, 15.0, 6.0)]);
+        assert!((f.position().0 - 20.0).abs() < 0.001);
+        assert!((f.position().1 - 15.0).abs() < 0.001);
+        // Pad drifts north — frog should follow.
+        f.update(0.02, 80.0, 46.0, &[(20.0, 11.5, 6.0)]);
+        assert!(
+            (f.position().1 - 11.5).abs() < 0.001,
+            "frog should follow drifted pad, got y={}",
+            f.position().1
         );
     }
 
