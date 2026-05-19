@@ -3,14 +3,19 @@
 //! Frogs spend most of their time stationary on the water surface
 //! with a slow throat-pulse breath. Every few seconds a frog picks a
 //! random direction, crouches in anticipation, springs forward in a
-//! parabolic-arc leap, and lands with a splash that ripples the
-//! water.
+//! fast-rise-slow-fall arc, and lands with a splash that ripples
+//! the water.
 //!
-//! Rendering: oval body + small head bulge + two bright yellow eyes
-//! on top + folded Z-shaped hind legs (or extended back during a
-//! jump) + small front legs that peek out from under the chin. The
-//! visible body size grows at the jump apex to simulate vertical
-//! lift (the frog is briefly closer to the camera).
+//! Rendering: a wide shoulder bulge + tapered rear oval (the frog
+//! is broadest near the head, like real pond frogs from above) +
+//! two large yellow eyes poking out sideways past the silhouette +
+//! folded Z-shaped hind legs (or extended back during a jump) +
+//! small front legs visible forward of the chin while sitting. The
+//! visible body size grows at the jump apex to read as vertical
+//! lift, and the jump's lift curve `(27/4) t (1-t)^2` peaks early
+//! to match the explosive push-off of a real frog. Swim drift uses
+//! the same logic: pulse-based velocity that spikes during the
+//! kick recovery and drops to near-zero between strokes.
 
 use crate::canvas::Canvas;
 use crate::rng::pseudo_rand;
@@ -21,47 +26,55 @@ use std::f64::consts::TAU;
 // ===========================================================================
 
 // Body geometry in world units (will be scaled by per-frog `size`).
-const BODY_HALF_LEN: f64 = 2.10;
-const BODY_HALF_WID: f64 = 1.20;
-const HEAD_BULGE_LEN: f64 = 1.05;
-const HEAD_HALF_WID: f64 = 0.90;
+//
+// The silhouette is built from two overlapping ovals: a wide
+// shoulder / head bulge up front and a tapered rear oval behind it.
+// The shoulder oval is INTENTIONALLY wider than the rear so the
+// frog reads with the broadest part near the head — matching the
+// way pond frogs look from above.
+const REAR_HALF_LEN: f64 = 2.25;
+const REAR_HALF_WID: f64 = 1.15;
+const REAR_CENTRE_FWD: f64 = -0.40;
+const SHOULDER_HALF_LEN: f64 = 1.65;
+const SHOULDER_HALF_WID: f64 = 1.55;
+const SHOULDER_CENTRE_FWD: f64 = 0.95;
 
-// Eyes — both the iris disc and pupil sized so they're not just one
-// sub-pixel. At scale 2 the iris fills a 2-pixel ring around a
-// 1-pixel pupil.
-const EYE_RADIUS: f64 = 0.60;
+// Eyes sit on top of the shoulder bulge, poking sideways past the
+// silhouette so they read like the prominent eye-bumps of a real frog.
+const EYE_RADIUS: f64 = 0.70;
 const EYE_OFFSET_FWD: f64 = 1.55;
-const EYE_OFFSET_SIDE: f64 = 0.82;
-const PUPIL_RADIUS: f64 = 0.18;
+const EYE_OFFSET_SIDE: f64 = 1.20;
+const PUPIL_RADIUS: f64 = 0.22;
 
 // Throat pulse bulge.
-const THROAT_FWD: f64 = 1.00;
-const THROAT_HALF_WID: f64 = 0.55;
+const THROAT_FWD: f64 = 1.20;
+const THROAT_HALF_WID: f64 = 0.70;
 
-// Hind-leg joints (sitting / folded Z shape). Negative `fwd` = behind body centre.
-// Lengths are pushed out compared to a typical compact pose so the
-// powerful hind legs read clearly even at small render sizes.
-const HIP_FWD: f64 = -1.05;
-const HIP_SIDE: f64 = 0.95;
-const KNEE_FWD: f64 = -2.80;
-const KNEE_SIDE: f64 = 2.30;
-const FOOT_FWD: f64 = -0.20;
-const FOOT_SIDE: f64 = 2.30;
+// Hind-leg joints (sitting / folded Z shape). Negative `fwd` = behind
+// body centre. The femur swings out wide and the tibia comes forward
+// — the unmistakable bunched-up "Z" of a sitting frog.
+const HIP_FWD: f64 = -1.20;
+const HIP_SIDE: f64 = 1.05;
+const KNEE_FWD: f64 = -3.10;
+const KNEE_SIDE: f64 = 2.55;
+const FOOT_FWD: f64 = 0.10;
+const FOOT_SIDE: f64 = 2.55;
 const LEG_THICKNESS: i32 = 1;
 
 // Hind-leg joints during a jump (extended straight back). The toes
-// reach well past the body so the leap looks like a real
-// hind-leg-driven launch.
-const EXT_HIP_FWD: f64 = -1.05;
-const EXT_HIP_SIDE: f64 = 0.65;
-const EXT_FOOT_FWD: f64 = -4.85;
-const EXT_FOOT_SIDE: f64 = 1.05;
+// reach about a body length behind the hip so the leap looks like a
+// real hind-leg-driven launch.
+const EXT_HIP_FWD: f64 = -1.20;
+const EXT_HIP_SIDE: f64 = 0.70;
+const EXT_FOOT_FWD: f64 = -5.40;
+const EXT_FOOT_SIDE: f64 = 1.10;
 
-// Front leg geometry — small, peeks out from under the chin.
-const FRONT_HIP_FWD: f64 = 1.10;
-const FRONT_HIP_SIDE: f64 = 0.65;
-const FRONT_FOOT_FWD: f64 = 1.95;
-const FRONT_FOOT_SIDE: f64 = 0.90;
+// Front leg geometry — small, peeks out from under the shoulder and
+// rests visibly forward of the chin when the frog is sitting.
+const FRONT_HIP_FWD: f64 = 1.20;
+const FRONT_HIP_SIDE: f64 = 0.85;
+const FRONT_FOOT_FWD: f64 = 2.30;
+const FRONT_FOOT_SIDE: f64 = 1.10;
 
 // Timing
 const SIT_DURATION_MIN: f64 = 3.0;
@@ -75,10 +88,13 @@ const CROAK_PULSE_RATE: f64 = 2.6; // Hz — about 4-5 pulses per croak
 const TONGUE_DURATION: f64 = 0.18; // fast — real frogs are even faster
 const TONGUE_REACH: f64 = 2.40; // world units forward of nose at peak
 
-// Swim: short paddle after landing in open water.
-const SWIM_DURATION: f64 = 1.5;
-const SWIM_STROKE_RATE: f64 = 1.6; // strokes per second
-const SWIM_DRIFT_SPEED: f64 = 2.4; // world units per second forward
+// Swim: short paddle after landing in open water. Drift speed is
+// pulse-based — peak velocity during the kick recovery (legs sweep
+// back together), near-zero during the leg extension phase. This
+// gives the classic glide-and-kick rhythm of a swimming frog.
+const SWIM_DURATION: f64 = 1.6;
+const SWIM_STROKE_RATE: f64 = 1.5; // strokes per second
+const SWIM_PEAK_SPEED: f64 = 5.0; // world units per second at peak kick
 
 // Lily-pad preference for jump targeting.
 const PAD_PREFERENCE: f64 = 0.65; // chance to aim at a pad if one is reachable
@@ -88,15 +104,15 @@ const PAD_LAND_THRESHOLD: f64 = 0.80; // fraction of pad radius counted as "on t
 const JUMP_DISTANCE_MIN: f64 = 5.5;
 const JUMP_DISTANCE_RANGE: f64 = 11.0;
 const SCARED_JUMP_DISTANCE: f64 = 18.0; // big jump away from the threat
-const JUMP_LIFT_SCALE: f64 = 0.40; // body grows this fraction at apex
+const JUMP_LIFT_SCALE: f64 = 0.55; // body grows this fraction at apex
 
 // Breathing (throat pulse)
 const BREATH_RATE: f64 = 1.4;
 
-// Per-frog size variation. Centred slightly above 1.0 so the frogs
-// read clearly at terminal scale even when the lily pads are small.
-const SIZE_MIN: f64 = 1.05;
-const SIZE_MAX: f64 = 1.35;
+// Per-frog size variation. Pushed up so the frog clearly reads as a
+// frog even when sitting still on the water.
+const SIZE_MIN: f64 = 1.25;
+const SIZE_MAX: f64 = 1.55;
 
 // Bounds margin so frogs don't spawn or land on the literal edge.
 const EDGE_MARGIN: f64 = 3.0;
@@ -316,11 +332,17 @@ impl Frog {
     }
 
     /// Returns 0..1, peaking at 1.0 at the jump apex.
+    ///
+    /// The trajectory is asymmetric: a real frog jump rises quickly
+    /// off the powerful hind-leg push, then falls back to the water
+    /// under gravity. We approximate that with `27/4 * t * (1-t)^2`
+    /// which peaks at exactly 1.0 at t = 1/3, then decays gently
+    /// to 0 at t = 1.
     fn jump_lift(&self) -> f64 {
         match self.state {
             FrogState::Jump { progress, .. } => {
                 let t = progress.clamp(0.0, 1.0);
-                4.0 * t * (1.0 - t)
+                (27.0 / 4.0) * t * (1.0 - t).powi(2)
             }
             _ => 0.0,
         }
@@ -454,9 +476,14 @@ impl Frog {
             } => {
                 remaining -= dt;
                 stroke_phase += dt * SWIM_STROKE_RATE * TAU;
-                // Slow forward drift in the heading direction.
-                let drift_dx = self.heading.cos() * SWIM_DRIFT_SPEED * dt;
-                let drift_dy = self.heading.sin() * SWIM_DRIFT_SPEED * dt;
+                // Pulsed forward drift — peaks during the kick
+                // (legs sweeping back together), near zero while
+                // the legs extend. Matches the glide-and-kick
+                // rhythm of a real swimming frog.
+                let thrust = (-stroke_phase.cos()).max(0.0);
+                let speed = SWIM_PEAK_SPEED * thrust;
+                let drift_dx = self.heading.cos() * speed * dt;
+                let drift_dy = self.heading.sin() * speed * dt;
                 self.x = (self.x + drift_dx).clamp(EDGE_MARGIN, (w - EDGE_MARGIN).max(EDGE_MARGIN));
                 self.y = (self.y + drift_dy).clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
                 if remaining <= 0.0 {
@@ -687,17 +714,23 @@ impl Frog {
         stretch_side: f64,
         lift: f64,
     ) {
-        let body_len = BODY_HALF_LEN * render_size * stretch_fwd;
-        let body_wid = BODY_HALF_WID * render_size * stretch_side;
-        let head_len = HEAD_BULGE_LEN * render_size * stretch_fwd;
-        let head_wid = HEAD_HALF_WID * render_size * stretch_side;
+        let rear = Oval {
+            cx: REAR_CENTRE_FWD * render_size * stretch_fwd,
+            half_len: REAR_HALF_LEN * render_size * stretch_fwd,
+            half_wid: REAR_HALF_WID * render_size * stretch_side,
+        };
+        let shoulder = Oval {
+            cx: SHOULDER_CENTRE_FWD * render_size * stretch_fwd,
+            half_len: SHOULDER_HALF_LEN * render_size * stretch_fwd,
+            half_wid: SHOULDER_HALF_WID * render_size * stretch_side,
+        };
 
-        // Iterate canvas sub-pixels in a bounding box that covers
-        // body + head + a small margin. For each pixel, inverse-rotate
-        // into body-local coords and decide whether it's inside.
-        let max_x = body_len + head_len + 1.0;
-        let max_y = body_wid.max(head_wid) + 1.0;
-        let bound = (max_x.max(max_y) * scale).ceil() as i32 + 2;
+        // Bounding box covers both ovals plus a small margin.
+        let max_x = (rear.cx + rear.half_len).max(shoulder.cx + shoulder.half_len);
+        let min_x = (rear.cx - rear.half_len).min(shoulder.cx - shoulder.half_len);
+        let max_y = rear.half_wid.max(shoulder.half_wid);
+        let extent = max_x.max(-min_x).max(max_y) + 1.0;
+        let bound = (extent * scale).ceil() as i32 + 2;
 
         let (cx, cy) = self.position();
         let cx_px = cx * scale;
@@ -709,14 +742,12 @@ impl Frog {
 
         for dy in -bound..=bound {
             for dx in -bound..=bound {
-                // Canvas px → world offset → body-local.
                 let world_dx = dx as f64 / scale;
                 let world_dy = dy as f64 / scale;
                 let bx = world_dx * cos_h + world_dy * sin_h;
                 let by = -world_dx * sin_h + world_dy * cos_h;
-                if let Some((r, g, b)) = body_pixel_colour(
-                    bx, by, body_len, body_wid, head_len, head_wid, lift, self.morph,
-                ) {
+                if let Some((r, g, b)) = body_pixel_colour(bx, by, rear, shoulder, lift, self.morph)
+                {
                     canvas.dot(cx_i + dx, cy_i + dy, r, g, b);
                 }
             }
@@ -997,40 +1028,62 @@ fn landed_on_pad(x: f64, y: f64, pads: &[(f64, f64, f64)]) -> bool {
     })
 }
 
+/// An oval lobe used to compose the frog silhouette.
+#[derive(Clone, Copy)]
+struct Oval {
+    cx: f64,
+    half_len: f64,
+    half_wid: f64,
+}
+
+impl Oval {
+    fn contains(self, bx: f64, by: f64) -> bool {
+        let nx = (bx - self.cx) / self.half_len;
+        let ny = by / self.half_wid;
+        nx * nx + ny * ny <= 1.0
+    }
+    fn distance_to_centre(self, bx: f64, by: f64) -> f64 {
+        let nx = (bx - self.cx) / self.half_len;
+        let ny = by / self.half_wid;
+        (nx * nx + ny * ny).sqrt()
+    }
+}
+
 /// Returns Some(colour) if the pixel is inside the body silhouette,
 /// or None if it's outside.
-#[allow(clippy::too_many_arguments)]
 fn body_pixel_colour(
     bx: f64,
     by: f64,
-    body_len: f64,
-    body_wid: f64,
-    head_len: f64,
-    head_wid: f64,
+    rear: Oval,
+    shoulder: Oval,
     lift: f64,
     morph: Morph,
 ) -> Option<(u8, u8, u8)> {
-    // Two overlapping ovals: main body (centred at 0) and head bulge
-    // (centred forward of body). Either one being inside paints the
-    // pixel.
-    let in_body = (bx / body_len).powi(2) + (by / body_wid).powi(2) <= 1.0;
-    let head_centre_fwd = body_len * 0.55;
-    let in_head = ((bx - head_centre_fwd) / head_len).powi(2) + (by / head_wid).powi(2) <= 1.0;
-    if !in_body && !in_head {
+    let in_rear = rear.contains(bx, by);
+    let in_shoulder = shoulder.contains(bx, by);
+    if !in_rear && !in_shoulder {
         return None;
     }
 
-    // Shade: lighter in the centre-back, darker toward the rim,
-    // belly tint mixed in at the jump apex.
-    let r_body = ((bx / body_len).powi(2) + (by / body_wid).powi(2))
-        .sqrt()
-        .min(1.0);
-    let base = if r_body < 0.55 {
+    // Shade: lighter near the centre of whichever lobe owns this
+    // pixel, darker toward the rim. Belly tint mixed in at the
+    // jump apex when the underside briefly faces the camera.
+    let r_lobe = if in_shoulder && in_rear {
+        rear.distance_to_centre(bx, by)
+            .min(shoulder.distance_to_centre(bx, by))
+    } else if in_shoulder {
+        shoulder.distance_to_centre(bx, by)
+    } else {
+        rear.distance_to_centre(bx, by)
+    }
+    .min(1.0);
+
+    let base = if r_lobe < 0.55 {
         morph.back_light()
     } else {
         morph.back_mid()
     };
-    let edge_mix = ((r_body - 0.80) * 4.0).clamp(0.0, 1.0);
+    let edge_mix = ((r_lobe - 0.80) * 4.0).clamp(0.0, 1.0);
     let with_edge = lerp_color(base, morph.back_dark(), edge_mix);
     let belly_mix = lift * 0.45;
     Some(lerp_color(with_edge, color::BELLY, belly_mix))
