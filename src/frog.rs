@@ -317,6 +317,14 @@ impl Frog {
         }
     }
 
+    /// True when the frog occupies a fixed spot on the water
+    /// surface (or on a pad) — i.e. it's not airborne in a jump and
+    /// not paddling. Pond uses this to decide which pads to tint
+    /// with the "occupied" palette.
+    pub fn is_resting(&self) -> bool {
+        !matches!(self.state, FrogState::Jump { .. } | FrogState::Swim { .. })
+    }
+
     /// Lateral velocity (world units per second). Non-zero only during
     /// Jump. Reserved for the lily-pad wake integration in a later
     /// iteration.

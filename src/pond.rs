@@ -110,6 +110,24 @@ impl Pond {
             }
         }
 
+        // Mark each lily pad as occupied if a resting frog is
+        // currently sitting on it. The pad uses this to darken
+        // toward the water palette so the frog reads clearly on top.
+        const OCCUPY_THRESHOLD: f64 = 0.85;
+        for pad in &mut self.lilies {
+            let (px, py, pr) = pad.snapshot();
+            let occupied = self.frogs.iter().any(|fr| {
+                if !fr.is_resting() {
+                    return false;
+                }
+                let (fx, fy) = fr.position();
+                let dx = fx - px;
+                let dy = fy - py;
+                (dx * dx + dy * dy).sqrt() < pr * OCCUPY_THRESHOLD
+            });
+            pad.set_occupied(occupied);
+        }
+
         self.bubble_spawn_timer -= dt;
         if self.bubble_spawn_timer <= 0.0 {
             let bx = pseudo_rand(self.bubble_rng) * w;
@@ -495,5 +513,36 @@ mod new_feature_tests {
             pond.rain.drops.is_empty(),
             "rain drops should be cleaned up even when rain mode is off"
         );
+    }
+
+    // -- pad occupancy ------------------------------------------------------
+
+    #[test]
+    fn pad_under_resting_frog_is_marked_occupied() {
+        let mut pond = Pond::new(80.0, 46.0);
+        // Park a frog right on top of the first pad and clear the
+        // others so they can't accidentally satisfy the predicate.
+        let (px, py, _) = pond.lilies[0].snapshot();
+        pond.frogs.clear();
+        pond.frogs.push(crate::frog::Frog::new(px, py, 0.0, 1.7));
+        // Tick once so the occupancy pass runs.
+        pond.update(0.05, 0.0, 80.0, 46.0);
+        assert!(
+            pond.lilies[0].is_occupied(),
+            "pad with a sitting frog on it should be marked occupied",
+        );
+    }
+
+    #[test]
+    fn pad_with_no_frog_nearby_is_unoccupied() {
+        let mut pond = Pond::new(80.0, 46.0);
+        pond.frogs.clear();
+        pond.update(0.05, 0.0, 80.0, 46.0);
+        for (i, pad) in pond.lilies.iter().enumerate() {
+            assert!(
+                !pad.is_occupied(),
+                "no frogs → pad #{i} should not be occupied",
+            );
+        }
     }
 }
