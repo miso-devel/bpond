@@ -37,8 +37,11 @@ const WEDGE_INNER_NP_MAX: f64 = 0.65;
 /// (radians). Bounded so the cut can never balloon by more.
 const WEDGE_JITTER_AMP: f64 = 0.05;
 
-const RADIUS_MIN: f64 = 3.5;
-const RADIUS_MAX: f64 = 6.5;
+// Pad radii are large enough that the biggest frog (size MAX with
+// half-length ≈ 3.15 wu) fits comfortably inside even the smallest
+// pad (diameter 10 wu).
+const RADIUS_MIN: f64 = 5.0;
+const RADIUS_MAX: f64 = 8.0;
 
 const ROTATION_RATE_MIN: f64 = 0.10;
 const ROTATION_RATE_MAX: f64 = 0.30;

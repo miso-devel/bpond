@@ -2,7 +2,7 @@
 
 use crate::bubble::Bubble;
 use crate::food::{Food, EAT_RANGE_SQ};
-use crate::frog::{spawn_frogs, Frog};
+use crate::frog::{spawn_frogs, Frog, FrogEvent};
 use crate::koi::Koi;
 use crate::lily::{spawn_pads, LilyPad};
 use crate::rain::RainSystem;
@@ -24,6 +24,9 @@ pub struct Pond {
 
 impl Pond {
     pub fn new(w: f64, h: f64) -> Self {
+        let lilies = spawn_pads(w, h);
+        let pad_snapshots: Vec<(f64, f64, f64)> = lilies.iter().map(|p| p.snapshot()).collect();
+        let frogs = spawn_frogs(&pad_snapshots);
         Pond {
             fish: vec![
                 Koi::new(w * 0.3, h * 0.35, 0.3, 7.5, 1.0),
@@ -34,8 +37,8 @@ impl Pond {
             foods: Vec::new(),
             ripples: Vec::new(),
             bubbles: Vec::new(),
-            lilies: spawn_pads(w, h),
-            frogs: spawn_frogs(w, h),
+            lilies,
+            frogs,
             rain: RainSystem::new(),
             rain_mode: false,
             bubble_spawn_timer: 1.0,
@@ -99,14 +102,20 @@ impl Pond {
         let pad_snapshots: Vec<(f64, f64, f64)> =
             self.lilies.iter().map(|p| p.snapshot()).collect();
         for fr in &mut self.frogs {
-            if let Some(splash) = fr.update(dt, w, h, &pad_snapshots) {
-                let f = splash.force;
-                self.ripples
-                    .push(Ripple::new(splash.x, splash.y, 6.0 * f, 1.2));
-                self.ripples
-                    .push(Ripple::new(splash.x, splash.y, 11.0 * f, 1.9));
-                self.ripples
-                    .push(Ripple::new(splash.x, splash.y, 16.0 * f, 2.6));
+            for ev in fr.update(dt, w, h, &pad_snapshots) {
+                match ev {
+                    FrogEvent::Splash { x, y, force } => {
+                        self.ripples.push(Ripple::new(x, y, 6.0 * force, 1.2));
+                        self.ripples.push(Ripple::new(x, y, 11.0 * force, 1.9));
+                        self.ripples.push(Ripple::new(x, y, 16.0 * force, 2.6));
+                    }
+                    FrogEvent::Wake { x, y } => {
+                        // A single small ring per kick, behind the
+                        // swimming frog. Lifetime kept short so the
+                        // wake fades before the next stroke.
+                        self.ripples.push(Ripple::new(x, y, 4.5, 1.2));
+                    }
+                }
             }
         }
 

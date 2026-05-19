@@ -1,25 +1,34 @@
-//! Pond frogs: sit, breathe, and leap.
+//! Pond frogs: sit, breathe, leap, and swim.
 //!
-//! Frogs spend most of their time stationary on the water surface
-//! with a slow throat-pulse breath. Every few seconds a frog picks a
-//! random direction, crouches in anticipation, springs forward in a
-//! fast-rise-slow-fall arc, and lands with a splash that ripples
-//! the water.
+//! The state machine carries two distinct rest postures so the frog
+//! matches its surroundings:
+//!
+//! * On a lily pad — `Sit` uses the dry posture (folded Z hind
+//!   legs, visible front legs, throat pulse). Off the timer, the
+//!   frog rolls into `Crouch → Jump → Land`, or occasionally
+//!   `Croak` (vocal sac inflation) or `TongueFlick`.
+//! * In open water — `Float` shows a submerged-tinted body with
+//!   hind legs trailing back (no front legs, no throat). Float
+//!   cycles with `SwimKick` (one propulsive breaststroke kick that
+//!   emits a wake ripple behind the frog), and Float occasionally
+//!   rolls a jump that aims at a lily pad.
+//!
+//! Landing on a pad after a jump transitions to `Sit`; landing in
+//! open water transitions to `Float`. The same crouch / jump / land
+//! pipeline serves both surfaces.
 //!
 //! Rendering: a wide shoulder bulge + tapered rear oval (the frog
 //! is broadest near the head, like real pond frogs from above) +
-//! two large yellow eyes poking out sideways past the silhouette +
-//! folded Z-shaped hind legs (or extended back during a jump) +
-//! small front legs visible forward of the chin while sitting. The
-//! visible body size grows at the jump apex to read as vertical
-//! lift, and the jump's lift curve `(27/4) t (1-t)^2` peaks early
-//! to match the explosive push-off of a real frog. Swim drift uses
-//! the same logic: pulse-based velocity that spikes during the
-//! kick recovery and drops to near-zero between strokes.
+//! two large yellow eyes poking out sideways past the silhouette.
+//! The visible body size grows at the jump apex to read as vertical
+//! lift; the lift curve `(27/4) t (1-t)^2` peaks early to match a
+//! real frog's explosive push-off. SwimKick drift is pulse-based:
+//! velocity spikes during the recovery sweep, drops to near-zero
+//! between strokes.
 
 use crate::canvas::Canvas;
 use crate::rng::pseudo_rand;
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
 // ===========================================================================
 // Tuning constants
@@ -88,13 +97,30 @@ const CROAK_PULSE_RATE: f64 = 2.6; // Hz — about 4-5 pulses per croak
 const TONGUE_DURATION: f64 = 0.18; // fast — real frogs are even faster
 const TONGUE_REACH: f64 = 2.40; // world units forward of nose at peak
 
-// Swim: short paddle after landing in open water. Drift speed is
-// pulse-based — peak velocity during the kick recovery (legs sweep
-// back together), near-zero during the leg extension phase. This
-// gives the classic glide-and-kick rhythm of a swimming frog.
-const SWIM_DURATION: f64 = 1.6;
+// Water residency.
+//
+// A frog that lands off-pad enters `Float` — it idles in the water,
+// body submerged, legs trailing. Float's timer eventually rolls one
+// of three actions:
+//
+//   • SwimKick — one propulsive breaststroke kick; pulse-based
+//     drift peaks during the recovery sweep, then the frog returns
+//     to Float.
+//   • Float — keep idling (reset the timer).
+//   • Crouch → Jump — try to leave the water, usually onto a pad.
+//
+// Crouch / Jump from water reuse the existing jump pipeline.
+const FLOAT_DURATION_MIN: f64 = 2.0;
+const FLOAT_DURATION_RANGE: f64 = 4.0; // 2-6 seconds of idle floating
+const SWIM_KICK_DURATION: f64 = 0.62; // one full stroke cycle
 const SWIM_STROKE_RATE: f64 = 1.5; // strokes per second
-const SWIM_PEAK_SPEED: f64 = 5.0; // world units per second at peak kick
+const SWIM_PEAK_SPEED: f64 = 5.0; // peak forward speed during recovery
+const FLOAT_DRIFT_AMP: f64 = 0.30; // tiny bob amplitude (wu) for idle Float
+
+// Action probabilities at the end of a Float period.
+const FLOAT_ACTION_KICK_THRESHOLD: f64 = 0.45; // [0, 0.45) → SwimKick
+const FLOAT_ACTION_REST_THRESHOLD: f64 = 0.80; // [0.45, 0.80) → another Float
+                                               //                                                  [0.80, 1.00) → Crouch + Jump
 
 // Lily-pad preference for jump targeting.
 const PAD_PREFERENCE: f64 = 0.65; // chance to aim at a pad if one is reachable
@@ -109,10 +135,10 @@ const JUMP_LIFT_SCALE: f64 = 0.55; // body grows this fraction at apex
 // Breathing (throat pulse)
 const BREATH_RATE: f64 = 1.4;
 
-// Per-frog size variation. Pushed up so the frog clearly reads as a
-// frog even when sitting still on the water.
-const SIZE_MIN: f64 = 1.25;
-const SIZE_MAX: f64 = 1.55;
+// Per-frog size variation. Sized so even the largest frog comfortably
+// fits inside the smallest lily pad (see RADIUS_MIN in lily.rs).
+const SIZE_MIN: f64 = 1.15;
+const SIZE_MAX: f64 = 1.40;
 
 // Bounds margin so frogs don't spawn or land on the literal edge.
 const EDGE_MARGIN: f64 = 3.0;
@@ -218,13 +244,18 @@ fn lerp_color(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
 }
 
 // ===========================================================================
-// Splash returned to the pond when a frog lands
+// Events emitted by a frog tick
 // ===========================================================================
 
-pub struct Splash {
-    pub x: f64,
-    pub y: f64,
-    pub force: f64,
+/// Anything a single `Frog::update` tick can ask the pond to do.
+/// Today: spawn ripples for splashes and swim wakes.
+pub enum FrogEvent {
+    /// The frog hit the water (or a pad). `force` is 1.0 for an
+    /// open-water belly-flop and 0.5 for a pad landing.
+    Splash { x: f64, y: f64, force: f64 },
+    /// A swimming kick threw water back behind the frog. The
+    /// caller should spawn one small ripple at `(x, y)`.
+    Wake { x: f64, y: f64 },
 }
 
 // ===========================================================================
@@ -233,7 +264,8 @@ pub struct Splash {
 
 #[derive(Clone, Copy, Debug)]
 pub enum FrogState {
-    /// Stationary on the water; throat pulses with breath.
+    /// Resting on a lily pad. Dry posture (folded Z hind legs,
+    /// visible front legs) and throat pulses with breath.
     Sit,
     /// Compressing in anticipation of a jump. Target is already
     /// decided so the jump phase can launch immediately.
@@ -252,9 +284,13 @@ pub enum FrogState {
     Croak { remaining: f64, pulse_phase: f64 },
     /// Tongue snaps out forward and retracts. Very brief.
     TongueFlick { remaining: f64 },
-    /// Paddling along the water surface after a landing that missed
-    /// a lily pad. Hind legs cycle through a breaststroke kick.
-    Swim { remaining: f64, stroke_phase: f64 },
+    /// Idling in open water — body submerged (drawn in a darker,
+    /// water-tinted palette), hind legs trailing back relaxed. The
+    /// `remaining` timer drives the next action roll.
+    Float { remaining: f64 },
+    /// One propulsive breaststroke kick. After it finishes the
+    /// frog returns to `Float`.
+    SwimKick { remaining: f64, stroke_phase: f64 },
 }
 
 // ===========================================================================
@@ -317,12 +353,27 @@ impl Frog {
         }
     }
 
-    /// True when the frog occupies a fixed spot on the water
-    /// surface (or on a pad) — i.e. it's not airborne in a jump and
-    /// not paddling. Pond uses this to decide which pads to tint
-    /// with the "occupied" palette.
+    /// True when the frog is at rest on a solid surface — i.e.
+    /// on a lily pad, not floating in water and not airborne.
+    /// Pond uses this together with a position check to decide
+    /// which pads to tint with the "occupied" palette.
     pub fn is_resting(&self) -> bool {
-        !matches!(self.state, FrogState::Jump { .. } | FrogState::Swim { .. })
+        matches!(
+            self.state,
+            FrogState::Sit
+                | FrogState::Crouch { .. }
+                | FrogState::Land { .. }
+                | FrogState::Croak { .. }
+                | FrogState::TongueFlick { .. }
+        )
+    }
+
+    /// True when the frog is currently in water (floating or kicking).
+    pub fn in_water(&self) -> bool {
+        matches!(
+            self.state,
+            FrogState::Float { .. } | FrogState::SwimKick { .. }
+        )
     }
 
     /// Lateral velocity (world units per second). Non-zero only during
@@ -373,35 +424,32 @@ impl Frog {
         self.state
     }
 
-    /// Advance the frog one frame. Returns a `Splash` on the tick
-    /// the frog lands so the caller can spawn a ripple.
+    /// Advance the frog one frame. Returns a list of side effects
+    /// (splashes, wakes) the pond should turn into ripples.
     ///
     /// `pads` is an immutable snapshot list of `(x, y, radius)` for
     /// every lily pad in the pond. Frogs use it to bias their jump
     /// targets toward landing on a pad, and to decide whether a
-    /// landing went into open water (→ Swim) or onto a pad (→ Sit).
-    pub fn update(&mut self, dt: f64, w: f64, h: f64, pads: &[(f64, f64, f64)]) -> Option<Splash> {
+    /// landing went into open water (→ Float) or onto a pad (→ Sit).
+    pub fn update(&mut self, dt: f64, w: f64, h: f64, pads: &[(f64, f64, f64)]) -> Vec<FrogEvent> {
         self.breath_phase += dt * BREATH_RATE;
         self.tick_blink(dt);
-        let current = self.state;
-        let (next, splash) = match current {
-            FrogState::Sit => (self.tick_sit(dt, w, h, pads), None),
+        let mut events: Vec<FrogEvent> = Vec::new();
+        let next = match self.state {
+            FrogState::Sit => self.tick_sit(dt, w, h, pads),
             FrogState::Crouch {
                 mut remaining,
                 target,
             } => {
                 remaining -= dt;
                 if remaining <= 0.0 {
-                    (
-                        FrogState::Jump {
-                            from: (self.x, self.y),
-                            to: target,
-                            progress: 0.0,
-                        },
-                        None,
-                    )
+                    FrogState::Jump {
+                        from: (self.x, self.y),
+                        to: target,
+                        progress: 0.0,
+                    }
                 } else {
-                    (FrogState::Crouch { remaining, target }, None)
+                    FrogState::Crouch { remaining, target }
                 }
             }
             FrogState::Jump {
@@ -414,40 +462,35 @@ impl Frog {
                     self.x = to.0;
                     self.y = to.1;
                     let on_pad = landed_on_pad(to.0, to.1, pads);
-                    let splash = Splash {
+                    events.push(FrogEvent::Splash {
                         x: to.0,
                         y: to.1,
                         force: if on_pad { 0.5 } else { LANDING_SPLASH_FORCE },
-                    };
-                    (
-                        FrogState::Land {
-                            remaining: LAND_DURATION,
-                        },
-                        Some(splash),
-                    )
+                    });
+                    FrogState::Land {
+                        remaining: LAND_DURATION,
+                    }
                 } else {
-                    (FrogState::Jump { from, to, progress }, None)
+                    FrogState::Jump { from, to, progress }
                 }
             }
             FrogState::Land { mut remaining } => {
                 remaining -= dt;
                 if remaining <= 0.0 {
-                    // If we landed in open water, paddle briefly
-                    // before settling — otherwise straight to Sit.
+                    // Pad landings settle into the dry Sit posture
+                    // immediately. Water landings drop the frog into
+                    // Float so it idles with submerged posture and
+                    // can choose to swim or jump out later.
                     if landed_on_pad(self.x, self.y, pads) {
                         self.reset_sit_timer();
-                        (FrogState::Sit, None)
+                        FrogState::Sit
                     } else {
-                        (
-                            FrogState::Swim {
-                                remaining: SWIM_DURATION,
-                                stroke_phase: 0.0,
-                            },
-                            None,
-                        )
+                        FrogState::Float {
+                            remaining: self.float_duration(),
+                        }
                     }
                 } else {
-                    (FrogState::Land { remaining }, None)
+                    FrogState::Land { remaining }
                 }
             }
             FrogState::Croak {
@@ -458,58 +501,98 @@ impl Frog {
                 pulse_phase += dt * CROAK_PULSE_RATE;
                 if remaining <= 0.0 {
                     self.reset_sit_timer();
-                    (FrogState::Sit, None)
+                    FrogState::Sit
                 } else {
-                    (
-                        FrogState::Croak {
-                            remaining,
-                            pulse_phase,
-                        },
-                        None,
-                    )
+                    FrogState::Croak {
+                        remaining,
+                        pulse_phase,
+                    }
                 }
             }
             FrogState::TongueFlick { mut remaining } => {
                 remaining -= dt;
                 if remaining <= 0.0 {
                     self.reset_sit_timer();
-                    (FrogState::Sit, None)
+                    FrogState::Sit
                 } else {
-                    (FrogState::TongueFlick { remaining }, None)
+                    FrogState::TongueFlick { remaining }
                 }
             }
-            FrogState::Swim {
+            FrogState::Float { mut remaining } => {
+                remaining -= dt;
+                // Tiny ambient bob so the frog isn't perfectly
+                // glued to the water.
+                let bob = self.breath_phase.sin() * FLOAT_DRIFT_AMP * dt;
+                self.y = (self.y + bob).clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
+                if remaining <= 0.0 {
+                    self.tick_float_action(w, h, pads)
+                } else {
+                    FrogState::Float { remaining }
+                }
+            }
+            FrogState::SwimKick {
                 mut remaining,
                 mut stroke_phase,
             } => {
+                let prev_phase = stroke_phase;
                 remaining -= dt;
                 stroke_phase += dt * SWIM_STROKE_RATE * TAU;
-                // Pulsed forward drift — peaks during the kick
-                // (legs sweeping back together), near zero while
-                // the legs extend. Matches the glide-and-kick
-                // rhythm of a real swimming frog.
                 let thrust = (-stroke_phase.cos()).max(0.0);
                 let speed = SWIM_PEAK_SPEED * thrust;
                 let drift_dx = self.heading.cos() * speed * dt;
                 let drift_dy = self.heading.sin() * speed * dt;
                 self.x = (self.x + drift_dx).clamp(EDGE_MARGIN, (w - EDGE_MARGIN).max(EDGE_MARGIN));
                 self.y = (self.y + drift_dy).clamp(EDGE_MARGIN, (h - EDGE_MARGIN).max(EDGE_MARGIN));
+                // Emit one wake ripple per stroke as the legs sweep
+                // back together (stroke_phase passes π). Spawn it
+                // about one body-length behind the frog.
+                if prev_phase < PI && stroke_phase >= PI {
+                    let trail = 1.6 * self.size;
+                    events.push(FrogEvent::Wake {
+                        x: self.x - self.heading.cos() * trail,
+                        y: self.y - self.heading.sin() * trail,
+                    });
+                }
                 if remaining <= 0.0 {
-                    self.reset_sit_timer();
-                    (FrogState::Sit, None)
+                    FrogState::Float {
+                        remaining: self.float_duration(),
+                    }
                 } else {
-                    (
-                        FrogState::Swim {
-                            remaining,
-                            stroke_phase,
-                        },
-                        None,
-                    )
+                    FrogState::SwimKick {
+                        remaining,
+                        stroke_phase,
+                    }
                 }
             }
         };
         self.state = next;
-        splash
+        events
+    }
+
+    fn float_duration(&mut self) -> f64 {
+        FLOAT_DURATION_MIN + self.next_rand() * FLOAT_DURATION_RANGE
+    }
+
+    /// When the Float timer runs out, decide what to do next.
+    fn tick_float_action(&mut self, w: f64, h: f64, pads: &[(f64, f64, f64)]) -> FrogState {
+        let roll = self.next_rand();
+        if roll < FLOAT_ACTION_KICK_THRESHOLD {
+            FrogState::SwimKick {
+                remaining: SWIM_KICK_DURATION,
+                stroke_phase: 0.0,
+            }
+        } else if roll < FLOAT_ACTION_REST_THRESHOLD {
+            FrogState::Float {
+                remaining: self.float_duration(),
+            }
+        } else {
+            let (tx, ty, hd) = self.choose_jump_target(w, h, pads);
+            self.heading = hd;
+            FrogState::Crouch {
+                remaining: CROUCH_DURATION,
+                target: (tx, ty),
+            }
+        }
     }
 
     fn reset_sit_timer(&mut self) {
@@ -671,48 +754,65 @@ impl Frog {
             (cx_px + wx_off * scale, cy_px + wy_off * scale)
         };
 
-        self.draw_body(canvas, scale, render_size, stretch_fwd, stretch_side, lift);
+        let submerged = self.in_water();
+        self.draw_body(
+            canvas,
+            scale,
+            render_size,
+            stretch_fwd,
+            stretch_side,
+            lift,
+            submerged,
+        );
 
-        // Hind-leg posture depends on what the frog is doing.
+        // Hind-leg posture depends on what the frog is doing. While
+        // in water the legs trail behind (Float) or actively stroke
+        // (SwimKick); on land they fold into the classic Z unless
+        // the frog is mid-jump.
         match self.state {
             FrogState::Jump { .. } => self.draw_extended_legs(canvas, &to_canvas, render_size),
-            FrogState::Swim { stroke_phase, .. } => {
+            FrogState::SwimKick { stroke_phase, .. } => {
                 self.draw_swim_legs(canvas, &to_canvas, render_size, stroke_phase)
             }
+            FrogState::Float { .. } => self.draw_trailing_legs(canvas, &to_canvas, render_size),
             _ => self.draw_folded_legs(canvas, &to_canvas, render_size, crouch),
         }
-        self.draw_front_legs(canvas, &to_canvas, render_size);
+        // Front legs only show when the frog is sitting on dry land
+        // — in water they're tucked beneath the chest.
+        if !submerged {
+            self.draw_front_legs(canvas, &to_canvas, render_size);
+        }
         self.draw_eyes(canvas, &to_canvas, render_size, scale);
 
-        // State-specific overlays.
-        match self.state {
-            FrogState::Sit => {
-                // Subtle breath pulse during Sit.
-                let bulge = (self.breath_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-                if bulge > 0.30 {
-                    self.draw_throat(canvas, &to_canvas, render_size, bulge);
+        // Throat / vocal sac / tongue all assume an above-water
+        // posture and only show on dry land.
+        if !submerged {
+            match self.state {
+                FrogState::Sit => {
+                    let bulge = (self.breath_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                    if bulge > 0.30 {
+                        self.draw_throat(canvas, &to_canvas, render_size, bulge);
+                    }
                 }
+                FrogState::Croak { pulse_phase, .. } => {
+                    let pulse = (pulse_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                    self.draw_vocal_sac(canvas, &to_canvas, render_size, scale, pulse);
+                }
+                FrogState::TongueFlick { remaining } => {
+                    let progress = 1.0 - (remaining / TONGUE_DURATION);
+                    let extension = if progress < 0.5 {
+                        progress * 2.0
+                    } else {
+                        (1.0 - progress) * 2.0
+                    };
+                    self.draw_tongue(canvas, &to_canvas, render_size, extension);
+                }
+                _ => {}
             }
-            FrogState::Croak { pulse_phase, .. } => {
-                // Big inflating vocal sac. Even at its smallest the
-                // sac is bigger than the resting throat so the croak
-                // reads as a different beat.
-                let pulse = (pulse_phase.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-                self.draw_vocal_sac(canvas, &to_canvas, render_size, scale, pulse);
-            }
-            FrogState::TongueFlick { remaining } => {
-                let progress = 1.0 - (remaining / TONGUE_DURATION);
-                let extension = if progress < 0.5 {
-                    progress * 2.0
-                } else {
-                    (1.0 - progress) * 2.0
-                };
-                self.draw_tongue(canvas, &to_canvas, render_size, extension);
-            }
-            _ => {}
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_body(
         &self,
         canvas: &mut Canvas,
@@ -721,6 +821,7 @@ impl Frog {
         stretch_fwd: f64,
         stretch_side: f64,
         lift: f64,
+        submerged: bool,
     ) {
         let rear = Oval {
             cx: REAR_CENTRE_FWD * render_size * stretch_fwd,
@@ -754,7 +855,8 @@ impl Frog {
                 let world_dy = dy as f64 / scale;
                 let bx = world_dx * cos_h + world_dy * sin_h;
                 let by = -world_dx * sin_h + world_dy * cos_h;
-                if let Some((r, g, b)) = body_pixel_colour(bx, by, rear, shoulder, lift, self.morph)
+                if let Some((r, g, b)) =
+                    body_pixel_colour(bx, by, rear, shoulder, lift, self.morph, submerged)
                 {
                     canvas.dot(cx_i + dx, cy_i + dy, r, g, b);
                 }
@@ -827,6 +929,34 @@ impl Frog {
     /// back in time with `stroke_phase` (which ticks at
     /// `SWIM_STROKE_RATE * TAU`). Knee and foot positions
     /// interpolate between folded and extended.
+    /// Relaxed posture for a floating frog: legs trail back roughly
+    /// halfway between the folded Z and the fully extended jump
+    /// pose. Used while the frog idles in water.
+    fn draw_trailing_legs(
+        &self,
+        canvas: &mut Canvas,
+        to_canvas: &impl Fn(f64, f64) -> (f64, f64),
+        render_size: f64,
+    ) {
+        // Interpolate halfway between EXT_* and the folded knee/foot
+        // positions for a "relaxed, drifting" posture.
+        let splay = 0.55;
+        let dark = self.morph.back_dark();
+        for &side in &[1.0_f64, -1.0] {
+            let hip = (EXT_HIP_FWD * render_size, EXT_HIP_SIDE * side * render_size);
+            let knee = (
+                (KNEE_FWD + (-1.0 - KNEE_FWD) * splay) * render_size,
+                (KNEE_SIDE + (1.0 - KNEE_SIDE) * splay) * side * render_size,
+            );
+            let foot = (
+                (FOOT_FWD + (EXT_FOOT_FWD - FOOT_FWD) * splay) * render_size,
+                (FOOT_SIDE + (EXT_FOOT_SIDE - FOOT_SIDE) * splay) * side * render_size,
+            );
+            draw_segment(canvas, to_canvas, hip, knee, dark, LEG_THICKNESS);
+            draw_segment(canvas, to_canvas, knee, foot, dark, LEG_THICKNESS);
+        }
+    }
+
     fn draw_swim_legs(
         &self,
         canvas: &mut Canvas,
@@ -1057,8 +1187,15 @@ impl Oval {
     }
 }
 
+/// Underwater body tint: pixels mix toward this when the frog is
+/// floating or kicking, so the body reads as submerged below the
+/// water's mirror surface.
+const SUBMERGED_TINT: (u8, u8, u8) = (18, 32, 48);
+const SUBMERGED_MIX: f64 = 0.62;
+
 /// Returns Some(colour) if the pixel is inside the body silhouette,
 /// or None if it's outside.
+#[allow(clippy::too_many_arguments)]
 fn body_pixel_colour(
     bx: f64,
     by: f64,
@@ -1066,6 +1203,7 @@ fn body_pixel_colour(
     shoulder: Oval,
     lift: f64,
     morph: Morph,
+    submerged: bool,
 ) -> Option<(u8, u8, u8)> {
     let in_rear = rear.contains(bx, by);
     let in_shoulder = shoulder.contains(bx, by);
@@ -1094,7 +1232,12 @@ fn body_pixel_colour(
     let edge_mix = ((r_lobe - 0.80) * 4.0).clamp(0.0, 1.0);
     let with_edge = lerp_color(base, morph.back_dark(), edge_mix);
     let belly_mix = lift * 0.45;
-    Some(lerp_color(with_edge, color::BELLY, belly_mix))
+    let surface = lerp_color(with_edge, color::BELLY, belly_mix);
+    Some(if submerged {
+        lerp_color(surface, SUBMERGED_TINT, SUBMERGED_MIX)
+    } else {
+        surface
+    })
 }
 
 // ===========================================================================
@@ -1148,17 +1291,34 @@ fn draw_segment(
 // Spawning
 // ===========================================================================
 
-/// Default frog set for a fresh pond. Seeds chosen so the trio
-/// shows up with a mix of colour morphs (green / olive / brown).
-pub fn spawn_frogs(w: f64, h: f64) -> Vec<Frog> {
-    [
-        (w * 0.18, h * 0.20, 0.4, 1.7_f64), // green
-        (w * 0.78, h * 0.32, 2.9, 5.2),     // olive
-        (w * 0.45, h * 0.78, 4.6, 3.1),     // brown
-    ]
-    .iter()
-    .map(|&(x, y, heading, seed)| Frog::new(x, y, heading, seed))
-    .collect()
+/// Default frog set for a fresh pond. We try to place each frog
+/// directly on a different lily pad (so the very first frame shows
+/// frogs at rest in their natural perches); any frog that runs out
+/// of available pads falls back to a sensible spot in open water.
+///
+/// Seeds are picked so the trio rolls a mix of colour morphs
+/// (green / olive / brown).
+pub fn spawn_frogs(pads: &[(f64, f64, f64)]) -> Vec<Frog> {
+    const STARTS: [(f64, f64); 3] = [(0.4, 1.7), (2.9, 5.2), (4.6, 3.1)];
+    STARTS
+        .iter()
+        .enumerate()
+        .map(|(i, &(heading, seed))| {
+            if let Some(&(px, py, _)) = pads.get(i) {
+                Frog::new(px, py, heading, seed)
+            } else {
+                // No pad to perch on — drop the frog in water near
+                // the centre and let it start in Float.
+                let x = 20.0 + i as f64 * 7.0;
+                let y = 15.0 + i as f64 * 5.0;
+                let mut f = Frog::new(x, y, heading, seed);
+                f.state = FrogState::Float {
+                    remaining: FLOAT_DURATION_MIN,
+                };
+                f
+            }
+        })
+        .collect()
 }
 
 // ===========================================================================
@@ -1262,16 +1422,20 @@ mod tests {
         f.sit_timer = 0.0;
         let mut splash = None;
         for _ in 0..200 {
-            if let Some(s) = f.update(0.02, 80.0, 46.0, &[]) {
-                splash = Some(s);
+            for ev in f.update(0.02, 80.0, 46.0, &[]) {
+                if let FrogEvent::Splash { x, y, force } = ev {
+                    splash = Some((x, y, force));
+                }
+            }
+            if splash.is_some() {
                 break;
             }
         }
-        let s = splash.expect("frog should emit a Splash when it lands");
-        assert!(s.force > 0.0);
+        let (sx, sy, force) = splash.expect("frog should emit a Splash when it lands");
+        assert!(force > 0.0);
         // Splash position must be where the frog now sits.
-        assert!((s.x - f.position().0).abs() < 1e-6);
-        assert!((s.y - f.position().1).abs() < 1e-6);
+        assert!((sx - f.position().0).abs() < 1e-6);
+        assert!((sy - f.position().1).abs() < 1e-6);
     }
 
     #[test]
@@ -1363,9 +1527,13 @@ mod tests {
 
     // -- spawn -----------------------------------------------------------
 
+    fn dummy_pads() -> Vec<(f64, f64, f64)> {
+        vec![(20.0, 15.0, 6.0), (60.0, 30.0, 5.5), (40.0, 35.0, 7.0)]
+    }
+
     #[test]
     fn spawn_frogs_yields_a_handful_of_frogs() {
-        let frogs = spawn_frogs(80.0, 46.0);
+        let frogs = spawn_frogs(&dummy_pads());
         assert!(
             frogs.len() >= 2,
             "expect at least 2 frogs, got {}",
@@ -1374,12 +1542,23 @@ mod tests {
     }
 
     #[test]
-    fn spawn_frogs_are_inside_pond() {
-        let (w, h) = (80.0, 46.0);
-        for f in spawn_frogs(w, h) {
-            let (x, y) = f.position();
-            assert!(x > 0.0 && x < w);
-            assert!(y > 0.0 && y < h);
+    fn spawn_frogs_perch_on_each_provided_pad() {
+        let pads = dummy_pads();
+        let frogs = spawn_frogs(&pads);
+        for (frog, pad) in frogs.iter().zip(pads.iter()) {
+            let (fx, fy) = frog.position();
+            assert!((fx - pad.0).abs() < 1e-9);
+            assert!((fy - pad.1).abs() < 1e-9);
+            assert!(matches!(frog.state(), FrogState::Sit));
+        }
+    }
+
+    #[test]
+    fn spawn_frogs_with_no_pads_drops_them_into_float() {
+        let frogs = spawn_frogs(&[]);
+        assert!(!frogs.is_empty());
+        for f in &frogs {
+            assert!(matches!(f.state(), FrogState::Float { .. }));
         }
     }
 
@@ -1532,26 +1711,6 @@ mod tests {
     // -- pad preference + swim ----------------------------------------
 
     #[test]
-    fn landing_in_water_transitions_to_swim() {
-        let mut f = default_frog();
-        f.state = FrogState::Crouch {
-            remaining: CROUCH_DURATION,
-            target: (50.0, 30.0),
-        };
-        f.heading = 0.0;
-        for _ in 0..120 {
-            f.update(0.02, 80.0, 46.0, &[]);
-            if matches!(f.state(), FrogState::Swim { .. }) {
-                return;
-            }
-        }
-        panic!(
-            "frog should be paddling after landing in open water, got {:?}",
-            f.state()
-        );
-    }
-
-    #[test]
     fn landing_on_pad_skips_swim() {
         let mut f = default_frog();
         f.state = FrogState::Crouch {
@@ -1559,46 +1718,120 @@ mod tests {
             target: (50.0, 30.0),
         };
         f.heading = 0.0;
-        let pads = [(50.0, 30.0, 4.5)];
-        let mut saw_swim = false;
+        let pads = [(50.0, 30.0, 5.5)];
+        let mut saw_water = false;
         for _ in 0..120 {
             f.update(0.02, 80.0, 46.0, &pads);
-            if matches!(f.state(), FrogState::Swim { .. }) {
-                saw_swim = true;
+            if matches!(
+                f.state(),
+                FrogState::Float { .. } | FrogState::SwimKick { .. }
+            ) {
+                saw_water = true;
             }
         }
-        assert!(!saw_swim, "landing on a pad should NOT enter Swim");
+        assert!(
+            !saw_water,
+            "landing on a pad should NOT enter Float or SwimKick",
+        );
     }
 
     #[test]
-    fn swim_state_resolves_back_to_sit() {
+    fn swim_kick_resolves_back_to_float() {
         let mut f = default_frog();
-        f.state = FrogState::Swim {
-            remaining: SWIM_DURATION,
+        f.state = FrogState::SwimKick {
+            remaining: SWIM_KICK_DURATION,
             stroke_phase: 0.0,
         };
-        for _ in 0..((SWIM_DURATION / 0.02) as usize + 10) {
+        for _ in 0..((SWIM_KICK_DURATION / 0.02) as usize + 10) {
             f.update(0.02, 80.0, 46.0, &[]);
         }
-        assert!(matches!(f.state(), FrogState::Sit));
+        assert!(
+            matches!(f.state(), FrogState::Float { .. }),
+            "after one kick the frog should idle in Float, got {:?}",
+            f.state(),
+        );
     }
 
     #[test]
-    fn swim_state_drifts_the_frog_forward() {
+    fn swim_kick_drifts_the_frog_forward() {
         let mut f = default_frog();
         f.heading = 0.0; // east
         let (x0, _) = f.position();
-        f.state = FrogState::Swim {
-            remaining: SWIM_DURATION,
+        f.state = FrogState::SwimKick {
+            remaining: SWIM_KICK_DURATION,
             stroke_phase: 0.0,
         };
-        for _ in 0..((SWIM_DURATION / 0.02) as usize) {
+        for _ in 0..((SWIM_KICK_DURATION / 0.02) as usize) {
             f.update(0.02, 80.0, 46.0, &[]);
         }
         let (x1, _) = f.position();
         assert!(
             x1 > x0 + 0.5,
-            "swimming frog should drift east; went from {x0:.2} to {x1:.2}",
+            "kicking frog should drift east; went from {x0:.2} to {x1:.2}",
+        );
+    }
+
+    #[test]
+    fn swim_kick_emits_a_wake_ripple() {
+        let mut f = default_frog();
+        f.heading = 0.0;
+        f.state = FrogState::SwimKick {
+            remaining: SWIM_KICK_DURATION,
+            stroke_phase: 0.0,
+        };
+        let mut wake_seen = false;
+        for _ in 0..((SWIM_KICK_DURATION / 0.02) as usize + 5) {
+            for ev in f.update(0.02, 80.0, 46.0, &[]) {
+                if let FrogEvent::Wake { x, .. } = ev {
+                    // Wake is behind the frog (heading east → west of x).
+                    assert!(
+                        x < f.position().0,
+                        "wake should appear behind the swimming frog",
+                    );
+                    wake_seen = true;
+                }
+            }
+        }
+        assert!(wake_seen, "one kick should emit at least one Wake event");
+    }
+
+    #[test]
+    fn landing_in_water_enters_float() {
+        let mut f = default_frog();
+        f.state = FrogState::Crouch {
+            remaining: CROUCH_DURATION,
+            target: (50.0, 30.0),
+        };
+        f.heading = 0.0;
+        for _ in 0..120 {
+            f.update(0.02, 80.0, 46.0, &[]);
+            if matches!(f.state(), FrogState::Float { .. }) {
+                return;
+            }
+        }
+        panic!(
+            "frog should be floating after landing in open water, got {:?}",
+            f.state()
+        );
+    }
+
+    #[test]
+    fn float_state_eventually_resolves() {
+        let mut f = default_frog();
+        f.state = FrogState::Float {
+            remaining: 0.0, // force an immediate action roll
+        };
+        // After enough ticks the Float should have transitioned out
+        // (to SwimKick, another Float, or Crouch).
+        for _ in 0..20 {
+            f.update(0.02, 80.0, 46.0, &[]);
+        }
+        // Just verify the state is one of the allowed water/action
+        // states (Float again, SwimKick, Crouch) — never Sit.
+        assert!(
+            !matches!(f.state(), FrogState::Sit),
+            "Float should not return to Sit, got {:?}",
+            f.state(),
         );
     }
 
@@ -1608,7 +1841,7 @@ mod tests {
         // skipping the action threshold check — we call the
         // choose_jump_target helper directly.
         let pads = [(30.0, 23.0, 4.5)];
-        let mut f = Frog::new(20.0, 23.0, 0.0, 12.0);
+        let f = Frog::new(20.0, 23.0, 0.0, 12.0);
         // pick_pad_target should return the pad's centre (it's the
         // only one within range).
         let target = f.pick_pad_target(&pads, JUMP_DISTANCE_MIN + JUMP_DISTANCE_RANGE);
@@ -1631,8 +1864,8 @@ mod tests {
     fn velocity_is_zero_outside_of_jump_state() {
         let mut f = default_frog();
         assert_eq!(f.velocity(), (0.0, 0.0));
-        f.state = FrogState::Swim {
-            remaining: SWIM_DURATION,
+        f.state = FrogState::SwimKick {
+            remaining: SWIM_KICK_DURATION,
             stroke_phase: 0.0,
         };
         assert_eq!(f.velocity(), (0.0, 0.0));

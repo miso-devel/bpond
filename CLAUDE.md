@@ -73,21 +73,34 @@ src/
   on the inside extends (asymmetric brake).
 - **Burst-scaled drawing**: the draw layer reads `self.burst` and
   scales fin beat amplitude and tail spread accordingly.
-- **Frog state machine** (`src/frog.rs`): `Sit → Crouch → Jump →
-  Land → (Sit | Swim → Sit)`, with occasional `Croak` and
-  `TongueFlick` branches off Sit. Crouch / Jump targets are biased
-  toward nearby lily pads (`PAD_PREFERENCE = 0.65`); landing in
-  open water diverts through `Swim` before the frog settles. Jump
-  velocity also feeds the lily-pad wake force so leaping near a
-  pad nudges it.
-- **Frog rendering**: body oval + head bulge + two yellow eyes
-  with pupils + folded-Z or extended hind legs depending on
-  state. Body grows visibly at the jump apex to read as vertical
-  lift. A vocal sac inflates under the chin during Croak; a pink
-  tongue snaps forward during TongueFlick; an occasional blink
-  replaces the eye with a dark slit (nictitating membrane). Each
-  frog rolls one of three colour morphs at spawn: `Green / Olive
-  / Brown`.
+- **Frog state machine** (`src/frog.rs`): two rest states
+  depending on whether the frog is on a pad or in water.
+  * `Sit` (on a pad) → `Crouch → Jump → Land → (Sit | Float)`
+    with `Croak` and `TongueFlick` branches.
+  * `Float` (in water) ↔ `SwimKick` (one propulsive breaststroke
+    kick); Float occasionally rolls a `Crouch → Jump` to leave
+    the water (preferring pads). The same `Crouch → Jump → Land`
+    pipeline serves both rest states.
+  Each `SwimKick` emits a `FrogEvent::Wake` ripple behind the
+  frog; each `Jump` landing emits `FrogEvent::Splash`. Jump
+  velocity also feeds the lily-pad wake force list.
+- **Frog rendering**: a wide shoulder oval + tapered rear oval
+  (broadest near the head). Two large yellow eyes poke sideways
+  past the silhouette. Hind-leg posture is state-driven:
+  * Sit/Crouch/Land: folded Z (femur out + tibia forward).
+  * Jump: extended straight back.
+  * Float: trailing back relaxed (mid-extended).
+  * SwimKick: animated breaststroke sweep.
+  When the frog is in water the whole body lerps toward a
+  submerged blue tint; only the eyes stay bright above the
+  surface, and front legs / throat / tongue overlays are hidden.
+  Body size grows at the jump apex (`(27/4) t (1-t)^2` lift
+  curve) to read as vertical lift. Each frog rolls one of three
+  colour morphs at spawn: `Green / Olive / Brown`.
+- **Pad occupancy** (`LilyPad::set_occupied`): each frame Pond
+  marks any pad that has a resting frog inside its footprint; the
+  pad's pixel shader lerps the green palette toward a water tint
+  so the frog reads clearly on top.
 
 ### When making changes
 
