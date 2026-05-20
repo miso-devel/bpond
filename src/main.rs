@@ -102,7 +102,7 @@ fn main() -> Result<()> {
                     KeyCode::Char('f') | KeyCode::Char('F') => {
                         let fx = (0.1 + rng::pseudo_rand(elapsed) * 0.8) * tw as f64;
                         let fy = (0.2 + rng::pseudo_rand(elapsed + 7.3) * 0.7) * world_h;
-                        pond.drop_food(fx, fy);
+                        pond.drop_food(fx, fy, tw as f64, world_h);
                     }
                     _ => {}
                 },
@@ -110,7 +110,7 @@ fn main() -> Result<()> {
                     if let MouseEventKind::Down(MouseButton::Left) = m.kind {
                         let scale = pond::compute_scale(tw, th);
                         let (fx, fy) = pond::screen_to_world(m.column, m.row, scale);
-                        pond.drop_food(fx, fy);
+                        pond.drop_food(fx, fy, tw as f64, world_h);
                     }
                     if let MouseEventKind::Down(MouseButton::Right) = m.kind {
                         let scale = pond::compute_scale(tw, th);

@@ -154,11 +154,17 @@ impl Pond {
         }
     }
 
-    pub fn drop_food(&mut self, x: f64, y: f64) {
+    pub fn drop_food(&mut self, x: f64, y: f64, w: f64, h: f64) {
         self.foods.push(Food::new(x, y));
         self.ripples.push(Ripple::new(x, y, 8.0, 1.5));
         self.ripples.push(Ripple::new(x, y, 15.0, 2.5));
         self.ripples.push(Ripple::new(x, y, 22.0, 3.5));
+        // The splash startles any frog within range, but the koi
+        // happily chase the pellet — so this only ripples through
+        // frogs, not fish.
+        for fr in &mut self.frogs {
+            fr.scare(x, y, w, h);
+        }
     }
 
     pub fn scare(&mut self, x: f64, y: f64, w: f64, h: f64) {
@@ -260,15 +266,15 @@ mod tests {
     #[test]
     fn drop_food_adds_pellet() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(10.0, 20.0);
-        pond.drop_food(30.0, 40.0);
+        pond.drop_food(10.0, 20.0, 80.0, 46.0);
+        pond.drop_food(30.0, 40.0, 80.0, 46.0);
         assert_eq!(pond.foods.len(), 2);
     }
 
     #[test]
     fn update_removes_dead_food() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(10.0, 20.0);
+        pond.drop_food(10.0, 20.0, 80.0, 46.0);
         pond.foods[0].remaining = 0.001;
         pond.update(0.1, 0.0, 80.0, 46.0);
         assert!(pond.foods.is_empty());
@@ -344,7 +350,7 @@ mod new_feature_tests {
     #[test]
     fn drop_food_creates_three_ripples() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(40.0, 23.0);
+        pond.drop_food(40.0, 23.0, 80.0, 46.0);
         assert_eq!(
             pond.ripples.len(),
             3,
@@ -355,7 +361,7 @@ mod new_feature_tests {
     #[test]
     fn drop_food_ripples_are_at_food_position() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(15.0, 22.0);
+        pond.drop_food(15.0, 22.0, 80.0, 46.0);
         for r in &pond.ripples {
             assert!((r.x - 15.0).abs() < 1e-10, "ripple x should match food x");
             assert!((r.y - 22.0).abs() < 1e-10, "ripple y should match food y");
@@ -365,10 +371,49 @@ mod new_feature_tests {
     #[test]
     fn drop_food_ripples_have_distinct_max_radii() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(40.0, 23.0);
+        pond.drop_food(40.0, 23.0, 80.0, 46.0);
         pond.update(1.0, 0.0, 80.0, 46.0);
         let alive = pond.ripples.iter().filter(|r| r.is_alive()).count();
         assert!(alive >= 1, "at least one ripple should be alive after 1s");
+    }
+
+    #[test]
+    fn drop_food_startles_a_nearby_frog() {
+        // Food dropping splashes the water — any frog within the
+        // scare radius should immediately Crouch to launch away,
+        // even though it doesn't actually eat the pellet.
+        let mut pond = Pond::new(80.0, 46.0);
+        // Find the first frog and aim the food drop right next to it
+        // so it's well inside SCARE_RANGE.
+        let (fx, fy) = pond.frogs[0].position();
+        pond.drop_food(fx + 1.0, fy + 1.0, 80.0, 46.0);
+        // The scare reaction transitions the frog to Crouch
+        // immediately, before any tick is taken.
+        assert!(
+            matches!(pond.frogs[0].state(), crate::frog::FrogState::Crouch { .. }),
+            "food-drop splash should scare the nearby frog, got {:?}",
+            pond.frogs[0].state(),
+        );
+    }
+
+    #[test]
+    fn drop_food_leaves_distant_frogs_alone() {
+        let mut pond = Pond::new(80.0, 46.0);
+        let before: Vec<_> = pond
+            .frogs
+            .iter()
+            .map(|f| std::mem::discriminant(&f.state()))
+            .collect();
+        // Splash way off in a corner so no frog can be in range.
+        pond.drop_food(0.0, 0.0, 80.0, 46.0);
+        for (i, f) in pond.frogs.iter().enumerate() {
+            // Position-far frogs should still be in their pre-splash state.
+            assert_eq!(
+                std::mem::discriminant(&f.state()),
+                before[i],
+                "frog #{i} should not have been scared by a far-away splash",
+            );
+        }
     }
 
     // -- scare (pond-level) -------------------------------------------------
@@ -400,7 +445,7 @@ mod new_feature_tests {
         // ripples during the long simulation window and mask the
         // invariant under test.
         pond.frogs.clear();
-        pond.drop_food(40.0, 23.0);
+        pond.drop_food(40.0, 23.0, 80.0, 46.0);
         assert_eq!(pond.ripples.len(), 3);
 
         for _ in 0..1000 {
@@ -463,8 +508,8 @@ mod new_feature_tests {
         // Each drop_food call creates exactly 3 concentric ripples.
         // Two separate drops must accumulate to 6 total.
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(20.0, 15.0);
-        pond.drop_food(60.0, 30.0);
+        pond.drop_food(20.0, 15.0, 80.0, 46.0);
+        pond.drop_food(60.0, 30.0, 80.0, 46.0);
         assert_eq!(
             pond.ripples.len(),
             6,

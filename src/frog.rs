@@ -62,16 +62,16 @@ const TONGUE_DURATION: f64 = 0.18; // fast — real frogs are even faster
 //   • Crouch → Jump — try to leave the water, usually onto a pad.
 //
 // Crouch / Jump from water reuse the existing jump pipeline.
-// Float idles are short — frogs in water actively swim most of
-// the time. After a kick they only briefly catch their breath.
-const FLOAT_DURATION_MIN: f64 = 1.0;
-const FLOAT_DURATION_RANGE: f64 = 2.5; // 1-3.5 seconds between actions
-const SWIM_KICK_DURATION: f64 = 0.62; // one full stroke cycle
-const SWIM_STROKE_RATE: f64 = 1.5; // strokes per second
-const SWIM_PEAK_SPEED: f64 = 5.0; // peak forward speed during recovery
+// Float idles are very brief — frogs in water swim almost
+// continuously, with only short glides between kicks.
+const FLOAT_DURATION_MIN: f64 = 0.35;
+const FLOAT_DURATION_RANGE: f64 = 0.90; // 0.35–1.25 s between actions
+const SWIM_KICK_DURATION: f64 = 0.55;
+const SWIM_STROKE_RATE: f64 = 1.7; // strokes per second
+const SWIM_PEAK_SPEED: f64 = 8.0; // peak forward speed during recovery
 const FLOAT_DRIFT_AMP: f64 = 0.30; // tiny vertical bob amplitude (wu)
-const FLOAT_GLIDE_SPEED: f64 = 0.45; // very slow forward drift while idling
-const FLOAT_HEADING_WANDER: f64 = 0.12; // rad/s peak heading drift while idling
+const FLOAT_GLIDE_SPEED: f64 = 0.65; // gentle drift while idling
+const FLOAT_HEADING_WANDER: f64 = 0.18; // rad/s peak heading drift while idling
 
 // Action probabilities at the end of a Float period. Strongly biased
 // toward kicking — a real pond frog in water swims actively rather
@@ -80,9 +80,14 @@ const FLOAT_HEADING_WANDER: f64 = 0.12; // rad/s peak heading drift while idling
 // A frog in water never jumps randomly. The "pad-jump" slot below is
 // only spent if there is a reachable lily pad to aim at; otherwise
 // it falls back to one more SwimKick.
-const FLOAT_ACTION_KICK_THRESHOLD: f64 = 0.75; // [0, 0.75) → SwimKick
-const FLOAT_ACTION_REST_THRESHOLD: f64 = 0.85; // [0.75, 0.85) → another Float
+const FLOAT_ACTION_KICK_THRESHOLD: f64 = 0.78; // [0, 0.78) → SwimKick
+const FLOAT_ACTION_REST_THRESHOLD: f64 = 0.85; // [0.78, 0.85) → another Float
                                                //                                                  [0.85, 1.00) → try a pad-jump
+
+/// Probability that a kick chains directly into another kick instead
+/// of resting in Float first. Gives a "two-kick burst" feel that
+/// real swimming frogs exhibit.
+const SWIM_CHAIN_PROBABILITY: f64 = 0.45;
 
 // Lily-pad preference for jump targeting.
 const PAD_PREFERENCE: f64 = 0.65; // chance to aim at a pad if one is reachable
@@ -525,8 +530,15 @@ impl Frog {
                         x: behind_x,
                         y: behind_y,
                     });
-                    FrogState::Float {
-                        remaining: self.float_duration(),
+                    // Roughly half the time chain another kick
+                    // directly — real swimming frogs often fire a
+                    // two- or three-kick burst before they coast.
+                    if self.next_rand() < SWIM_CHAIN_PROBABILITY {
+                        self.swim_kick()
+                    } else {
+                        FrogState::Float {
+                            remaining: self.float_duration(),
+                        }
                     }
                 } else {
                     FrogState::SwimKick {
