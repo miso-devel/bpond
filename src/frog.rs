@@ -71,7 +71,18 @@ const SWIM_STROKE_RATE: f64 = 1.7; // strokes per second
 const SWIM_PEAK_SPEED: f64 = 8.0; // peak forward speed during recovery
 const FLOAT_DRIFT_AMP: f64 = 0.30; // tiny vertical bob amplitude (wu)
 const FLOAT_GLIDE_SPEED: f64 = 0.65; // gentle drift while idling
-const FLOAT_HEADING_WANDER: f64 = 0.18; // rad/s peak heading drift while idling
+const FLOAT_HEADING_WANDER: f64 = 0.45; // rad/s peak heading drift while idling
+
+/// Heading change applied at the start of every SwimKick. The turn
+/// is uniform in `[-SWIM_KICK_TURN_RANGE/2, +SWIM_KICK_TURN_RANGE/2]`,
+/// so individual kicks swerve up to about ±0.5 rad (≈ 29°). Chained
+/// kicks compound into a clearly curved path, not a straight line.
+const SWIM_KICK_TURN_RANGE: f64 = 1.0;
+/// Continuous heading wander during a SwimKick. Smaller than the
+/// per-kick turn so paths still read as deliberate strokes, but
+/// large enough that even a single kick doesn't trace a perfect
+/// line.
+const SWIM_HEADING_WANDER: f64 = 0.55; // rad/s peak
 
 // Action probabilities at the end of a Float period. Strongly biased
 // toward kicking — a real pond frog in water swims actively rather
@@ -505,6 +516,10 @@ impl Frog {
                 let prev_phase = stroke_phase;
                 remaining -= dt;
                 stroke_phase += dt * SWIM_STROKE_RATE * TAU;
+                // Smooth heading wander during the stroke so even a
+                // single uninterrupted kick traces a slight curve.
+                let wander = (self.breath_phase * 0.7 + 0.3).sin() * SWIM_HEADING_WANDER * dt;
+                self.heading += wander;
                 let thrust = (-stroke_phase.cos()).max(0.0);
                 let speed = SWIM_PEAK_SPEED * thrust;
                 let drift_dx = self.heading.cos() * speed * dt;
@@ -585,7 +600,12 @@ impl Frog {
         }
     }
 
-    fn swim_kick(&self) -> FrogState {
+    /// Start a fresh SwimKick. Each kick begins with a small random
+    /// turn — that's what gives swimming frogs their curved,
+    /// non-straight paths through the water.
+    fn swim_kick(&mut self) -> FrogState {
+        let turn = (self.next_rand() - 0.5) * SWIM_KICK_TURN_RANGE;
+        self.heading += turn;
         FrogState::SwimKick {
             remaining: SWIM_KICK_DURATION,
             stroke_phase: 0.0,
@@ -1284,6 +1304,49 @@ mod tests {
             }
         }
         panic!("frog should eventually jump toward the in-range pad");
+    }
+
+    #[test]
+    fn swimming_frog_traces_a_curved_path() {
+        // After many kicks the spread of headings the frog has held
+        // should be wide — a curving path, not a straight line.
+        let mut f = default_frog();
+        f.x = 30.0;
+        f.y = 23.0;
+        f.heading = 0.0;
+        let mut min_h = f.heading;
+        let mut max_h = f.heading;
+        let mut kicks = 0;
+        let mut was_kicking = matches!(f.state(), FrogState::SwimKick { .. });
+        f.state = FrogState::Float { remaining: 0.0 };
+        for _ in 0..600 {
+            f.update(0.02, 80.0, 46.0, &[]);
+            let is_kicking = matches!(f.state(), FrogState::SwimKick { .. });
+            if is_kicking && !was_kicking {
+                kicks += 1;
+            }
+            was_kicking = is_kicking;
+            min_h = min_h.min(f.heading);
+            max_h = max_h.max(f.heading);
+            // Re-arm Float so kicks keep firing.
+            if let FrogState::Float { remaining } = &mut f.state {
+                if *remaining > 0.0 {
+                    *remaining = 0.0;
+                }
+            }
+            if kicks >= 10 {
+                break;
+            }
+        }
+        let spread = max_h - min_h;
+        assert!(
+            kicks >= 5,
+            "the test should observe several kicks, got {kicks}",
+        );
+        assert!(
+            spread > 0.5,
+            "a swimming frog should curve — heading spread was only {spread} rad over {kicks} kicks",
+        );
     }
 
     #[test]
