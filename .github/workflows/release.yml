@@ -44,17 +44,23 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: publish-crate
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon native + Intel cross-compiled — both run on
+          # the `macos-latest` (Apple Silicon) runner. The Intel
+          # `macos-13` runner pool has been unreliable: every release
+          # since v0.3.1 saw the x86_64-apple-darwin job hang for the
+          # 24-hour limit before being cancelled.
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
             archive: tar.gz
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
