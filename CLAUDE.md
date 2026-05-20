@@ -35,10 +35,12 @@ src/
 ├── main.rs           # event loop + drawing (water / food / header)
 ├── canvas.rs         # braille sub-pixel canvas (1 cell = 2×4 dots)
 ├── food.rs           # food pellet lifecycle
+├── frog.rs           # pond frogs: state machine + breath + croak + tongue + jump + swim
 ├── koi.rs            # koi: struct, constants, public API
 ├── koi/physics.rs    # steering, body wave (animate_body), Boids, sub-step update
 ├── koi/draw.rs       # body / tail / fins / eyes / burst-scaled rendering
-├── pond.rs           # pond: koi+food state, coordinate helpers
+├── lily.rs           # floating lily pads (V-wedge notches + drift physics)
+├── pond.rs           # pond: koi+frog+lily+food state, coordinate helpers
 ├── ripple.rs         # expanding ripple rings
 ├── bubble.rs         # rising bubbles
 ├── rain.rs           # rain system
@@ -71,6 +73,34 @@ src/
   on the inside extends (asymmetric brake).
 - **Burst-scaled drawing**: the draw layer reads `self.burst` and
   scales fin beat amplitude and tail spread accordingly.
+- **Frog state machine** (`src/frog.rs`): two rest states
+  depending on whether the frog is on a pad or in water.
+  * `Sit` (on a pad) → `Crouch → Jump → Land → (Sit | Float)`
+    with `Croak` and `TongueFlick` branches.
+  * `Float` (in water) ↔ `SwimKick` (one propulsive breaststroke
+    kick); Float occasionally rolls a `Crouch → Jump` to leave
+    the water (preferring pads). The same `Crouch → Jump → Land`
+    pipeline serves both rest states.
+  Each `SwimKick` emits a `FrogEvent::Wake` ripple behind the
+  frog; each `Jump` landing emits `FrogEvent::Splash`. Jump
+  velocity also feeds the lily-pad wake force list.
+- **Frog rendering**: a wide shoulder oval + tapered rear oval
+  (broadest near the head). Two large yellow eyes poke sideways
+  past the silhouette. Hind-leg posture is state-driven:
+  * Sit/Crouch/Land: folded Z (femur out + tibia forward).
+  * Jump: extended straight back.
+  * Float: trailing back relaxed (mid-extended).
+  * SwimKick: animated breaststroke sweep.
+  When the frog is in water the whole body lerps toward a
+  submerged blue tint; only the eyes stay bright above the
+  surface, and front legs / throat / tongue overlays are hidden.
+  Body size grows at the jump apex (`(27/4) t (1-t)^2` lift
+  curve) to read as vertical lift. Each frog rolls one of three
+  colour morphs at spawn: `Green / Olive / Brown`.
+- **Pad occupancy** (`LilyPad::set_occupied`): each frame Pond
+  marks any pad that has a resting frog inside its footprint; the
+  pad's pixel shader lerps the green palette toward a water tint
+  so the frog reads clearly on top.
 
 ### When making changes
 
@@ -89,7 +119,7 @@ src/
 ## Key Bindings
 
 - Left click — drop food (koi swim over and eat it)
-- Right click — scare nearby koi (they dart, then return)
+- Right click — scare nearby koi (they dart, then return) and frogs (which immediately leap away)
 - `f` — drop food at a random position (no mouse needed)
 - `+` / `=` — add one koi
 - `-` — remove one koi

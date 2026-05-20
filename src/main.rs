@@ -1,6 +1,7 @@
 mod bubble;
 mod canvas;
 mod food;
+mod frog;
 mod koi;
 mod lily;
 mod pond;
@@ -74,6 +75,10 @@ fn main() -> Result<()> {
             for pad in &pond.lilies {
                 pad.draw(&mut canvas, scale, elapsed);
             }
+            // Frogs sit on top of the pads / water.
+            for fr in &pond.frogs {
+                fr.draw(&mut canvas, scale);
+            }
             if debug {
                 canvas.render(buf, 0, 1, area);
                 draw_header(buf, area, speed);
@@ -97,7 +102,7 @@ fn main() -> Result<()> {
                     KeyCode::Char('f') | KeyCode::Char('F') => {
                         let fx = (0.1 + rng::pseudo_rand(elapsed) * 0.8) * tw as f64;
                         let fy = (0.2 + rng::pseudo_rand(elapsed + 7.3) * 0.7) * world_h;
-                        pond.drop_food(fx, fy);
+                        pond.drop_food(fx, fy, tw as f64, world_h);
                     }
                     _ => {}
                 },
@@ -105,12 +110,12 @@ fn main() -> Result<()> {
                     if let MouseEventKind::Down(MouseButton::Left) = m.kind {
                         let scale = pond::compute_scale(tw, th);
                         let (fx, fy) = pond::screen_to_world(m.column, m.row, scale);
-                        pond.drop_food(fx, fy);
+                        pond.drop_food(fx, fy, tw as f64, world_h);
                     }
                     if let MouseEventKind::Down(MouseButton::Right) = m.kind {
                         let scale = pond::compute_scale(tw, th);
                         let (fx, fy) = pond::screen_to_world(m.column, m.row, scale);
-                        pond.scare(fx, fy);
+                        pond.scare(fx, fy, tw as f64, world_h);
                     }
                 }
                 _ => {}

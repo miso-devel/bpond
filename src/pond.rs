@@ -2,6 +2,7 @@
 
 use crate::bubble::Bubble;
 use crate::food::{Food, EAT_RANGE_SQ};
+use crate::frog::{spawn_frogs, Frog, FrogEvent};
 use crate::koi::Koi;
 use crate::lily::{spawn_pads, LilyPad};
 use crate::rain::RainSystem;
@@ -14,6 +15,7 @@ pub struct Pond {
     pub ripples: Vec<Ripple>,
     pub bubbles: Vec<Bubble>,
     pub lilies: Vec<LilyPad>,
+    pub frogs: Vec<Frog>,
     pub rain: RainSystem,
     pub rain_mode: bool,
     bubble_spawn_timer: f64,
@@ -22,6 +24,9 @@ pub struct Pond {
 
 impl Pond {
     pub fn new(w: f64, h: f64) -> Self {
+        let lilies = spawn_pads(w, h);
+        let pad_snapshots: Vec<(f64, f64, f64)> = lilies.iter().map(|p| p.snapshot()).collect();
+        let frogs = spawn_frogs(&pad_snapshots);
         Pond {
             fish: vec![
                 Koi::new(w * 0.3, h * 0.35, 0.3, 7.5, 1.0),
@@ -32,7 +37,8 @@ impl Pond {
             foods: Vec::new(),
             ripples: Vec::new(),
             bubbles: Vec::new(),
-            lilies: spawn_pads(w, h),
+            lilies,
+            frogs,
             rain: RainSystem::new(),
             rain_mode: false,
             bubble_spawn_timer: 1.0,
@@ -70,9 +76,10 @@ impl Pond {
         self.ripples.retain(|r| r.is_alive());
 
         // Lily pads drift with ambient current and pick up wake from
-        // any nearby koi. Collect (x, y, vx, vy) per fish — the lily
-        // tick reads it without aliasing fish.
-        let koi_data: Vec<(f64, f64, f64, f64)> = self
+        // any nearby koi or jumping frog. Collect (x, y, vx, vy)
+        // per actor — the lily tick reads it without aliasing the
+        // other lists.
+        let mut actor_wake: Vec<(f64, f64, f64, f64)> = self
             .fish
             .iter()
             .map(|k| {
@@ -81,8 +88,48 @@ impl Pond {
                 (kx, ky, kvx, kvy)
             })
             .collect();
+        for fr in &self.frogs {
+            let (fx, fy) = fr.position();
+            let (vx, vy) = fr.velocity();
+            actor_wake.push((fx, fy, vx, vy));
+        }
         for pad in &mut self.lilies {
-            pad.tick(dt, t, &koi_data);
+            pad.tick(dt, t, &actor_wake);
+        }
+
+        // Snapshot lily pad positions so frogs can prefer landing on
+        // them and skip the Swim phase when they do.
+        let pad_snapshots: Vec<(f64, f64, f64)> =
+            self.lilies.iter().map(|p| p.snapshot()).collect();
+        for fr in &mut self.frogs {
+            for ev in fr.update(dt, w, h, &pad_snapshots) {
+                match ev {
+                    FrogEvent::Splash { x, y, force } => {
+                        self.ripples.push(Ripple::new(x, y, 6.0 * force, 1.2));
+                        self.ripples.push(Ripple::new(x, y, 11.0 * force, 1.9));
+                        self.ripples.push(Ripple::new(x, y, 16.0 * force, 2.6));
+                    }
+                    FrogEvent::Wake { x, y } => {
+                        // A single small ring per kick, behind the
+                        // swimming frog. Lifetime kept short so the
+                        // wake fades before the next stroke.
+                        self.ripples.push(Ripple::new(x, y, 4.5, 1.2));
+                    }
+                }
+            }
+        }
+
+        // Mark each lily pad as occupied if a frog is currently
+        // anchored to it. Frogs carry an `on_pad` index that's the
+        // single source of truth — no distance check needed, so the
+        // result stays accurate even while pads drift.
+        let occupied_pads: std::collections::HashSet<usize> = self
+            .frogs
+            .iter()
+            .filter_map(|fr| fr.perched_pad())
+            .collect();
+        for (i, pad) in self.lilies.iter_mut().enumerate() {
+            pad.set_occupied(occupied_pads.contains(&i));
         }
 
         self.bubble_spawn_timer -= dt;
@@ -107,16 +154,25 @@ impl Pond {
         }
     }
 
-    pub fn drop_food(&mut self, x: f64, y: f64) {
+    pub fn drop_food(&mut self, x: f64, y: f64, w: f64, h: f64) {
         self.foods.push(Food::new(x, y));
         self.ripples.push(Ripple::new(x, y, 8.0, 1.5));
         self.ripples.push(Ripple::new(x, y, 15.0, 2.5));
         self.ripples.push(Ripple::new(x, y, 22.0, 3.5));
+        // The splash startles any frog within range, but the koi
+        // happily chase the pellet — so this only ripples through
+        // frogs, not fish.
+        for fr in &mut self.frogs {
+            fr.scare(x, y, w, h);
+        }
     }
 
-    pub fn scare(&mut self, x: f64, y: f64) {
+    pub fn scare(&mut self, x: f64, y: f64, w: f64, h: f64) {
         for fish in &mut self.fish {
             fish.scare(x, y);
+        }
+        for fr in &mut self.frogs {
+            fr.scare(x, y, w, h);
         }
     }
 
@@ -210,15 +266,15 @@ mod tests {
     #[test]
     fn drop_food_adds_pellet() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(10.0, 20.0);
-        pond.drop_food(30.0, 40.0);
+        pond.drop_food(10.0, 20.0, 80.0, 46.0);
+        pond.drop_food(30.0, 40.0, 80.0, 46.0);
         assert_eq!(pond.foods.len(), 2);
     }
 
     #[test]
     fn update_removes_dead_food() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(10.0, 20.0);
+        pond.drop_food(10.0, 20.0, 80.0, 46.0);
         pond.foods[0].remaining = 0.001;
         pond.update(0.1, 0.0, 80.0, 46.0);
         assert!(pond.foods.is_empty());
@@ -294,7 +350,7 @@ mod new_feature_tests {
     #[test]
     fn drop_food_creates_three_ripples() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(40.0, 23.0);
+        pond.drop_food(40.0, 23.0, 80.0, 46.0);
         assert_eq!(
             pond.ripples.len(),
             3,
@@ -305,7 +361,7 @@ mod new_feature_tests {
     #[test]
     fn drop_food_ripples_are_at_food_position() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(15.0, 22.0);
+        pond.drop_food(15.0, 22.0, 80.0, 46.0);
         for r in &pond.ripples {
             assert!((r.x - 15.0).abs() < 1e-10, "ripple x should match food x");
             assert!((r.y - 22.0).abs() < 1e-10, "ripple y should match food y");
@@ -315,10 +371,49 @@ mod new_feature_tests {
     #[test]
     fn drop_food_ripples_have_distinct_max_radii() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(40.0, 23.0);
+        pond.drop_food(40.0, 23.0, 80.0, 46.0);
         pond.update(1.0, 0.0, 80.0, 46.0);
         let alive = pond.ripples.iter().filter(|r| r.is_alive()).count();
         assert!(alive >= 1, "at least one ripple should be alive after 1s");
+    }
+
+    #[test]
+    fn drop_food_startles_a_nearby_frog() {
+        // Food dropping splashes the water — any frog within the
+        // scare radius should immediately Crouch to launch away,
+        // even though it doesn't actually eat the pellet.
+        let mut pond = Pond::new(80.0, 46.0);
+        // Find the first frog and aim the food drop right next to it
+        // so it's well inside SCARE_RANGE.
+        let (fx, fy) = pond.frogs[0].position();
+        pond.drop_food(fx + 1.0, fy + 1.0, 80.0, 46.0);
+        // The scare reaction transitions the frog to Crouch
+        // immediately, before any tick is taken.
+        assert!(
+            matches!(pond.frogs[0].state(), crate::frog::FrogState::Crouch { .. }),
+            "food-drop splash should scare the nearby frog, got {:?}",
+            pond.frogs[0].state(),
+        );
+    }
+
+    #[test]
+    fn drop_food_leaves_distant_frogs_alone() {
+        let mut pond = Pond::new(80.0, 46.0);
+        let before: Vec<_> = pond
+            .frogs
+            .iter()
+            .map(|f| std::mem::discriminant(&f.state()))
+            .collect();
+        // Splash way off in a corner so no frog can be in range.
+        pond.drop_food(0.0, 0.0, 80.0, 46.0);
+        for (i, f) in pond.frogs.iter().enumerate() {
+            // Position-far frogs should still be in their pre-splash state.
+            assert_eq!(
+                std::mem::discriminant(&f.state()),
+                before[i],
+                "frog #{i} should not have been scared by a far-away splash",
+            );
+        }
     }
 
     // -- scare (pond-level) -------------------------------------------------
@@ -326,13 +421,13 @@ mod new_feature_tests {
     #[test]
     fn pond_scare_does_not_panic() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.scare(40.0, 23.0);
+        pond.scare(40.0, 23.0, 80.0, 46.0);
     }
 
     #[test]
     fn pond_scare_activates_all_fish() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.scare(0.0, 0.0);
+        pond.scare(0.0, 0.0, 80.0, 46.0);
         for (i, fish) in pond.fish.iter().enumerate() {
             assert!(
                 fish.scare_timer > 0.0,
@@ -346,7 +441,11 @@ mod new_feature_tests {
     #[test]
     fn ripples_are_removed_when_dead() {
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(40.0, 23.0);
+        // Remove frogs — their leap splashes would spawn fresh
+        // ripples during the long simulation window and mask the
+        // invariant under test.
+        pond.frogs.clear();
+        pond.drop_food(40.0, 23.0, 80.0, 46.0);
         assert_eq!(pond.ripples.len(), 3);
 
         for _ in 0..1000 {
@@ -409,8 +508,8 @@ mod new_feature_tests {
         // Each drop_food call creates exactly 3 concentric ripples.
         // Two separate drops must accumulate to 6 total.
         let mut pond = Pond::new(80.0, 46.0);
-        pond.drop_food(20.0, 15.0);
-        pond.drop_food(60.0, 30.0);
+        pond.drop_food(20.0, 15.0, 80.0, 46.0);
+        pond.drop_food(60.0, 30.0, 80.0, 46.0);
         assert_eq!(
             pond.ripples.len(),
             6,
@@ -463,5 +562,41 @@ mod new_feature_tests {
             pond.rain.drops.is_empty(),
             "rain drops should be cleaned up even when rain mode is off"
         );
+    }
+
+    // -- pad occupancy ------------------------------------------------------
+
+    #[test]
+    fn pads_under_spawned_frogs_are_marked_occupied() {
+        // spawn_frogs perches frog `i` onto pad `i`. After one tick
+        // the occupancy pass should reflect that exactly.
+        let mut pond = Pond::new(80.0, 46.0);
+        pond.update(0.05, 0.0, 80.0, 46.0);
+        let frog_count = pond.frogs.len();
+        for i in 0..frog_count {
+            assert!(
+                pond.lilies[i].is_occupied(),
+                "pad #{i} should be occupied by frog #{i}",
+            );
+        }
+        for (i, pad) in pond.lilies.iter().enumerate().skip(frog_count) {
+            assert!(
+                !pad.is_occupied(),
+                "pad #{i} (beyond frog count) should not be occupied",
+            );
+        }
+    }
+
+    #[test]
+    fn pad_with_no_frog_nearby_is_unoccupied() {
+        let mut pond = Pond::new(80.0, 46.0);
+        pond.frogs.clear();
+        pond.update(0.05, 0.0, 80.0, 46.0);
+        for (i, pad) in pond.lilies.iter().enumerate() {
+            assert!(
+                !pad.is_occupied(),
+                "no frogs → pad #{i} should not be occupied",
+            );
+        }
     }
 }

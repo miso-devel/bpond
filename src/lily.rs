@@ -37,8 +37,11 @@ const WEDGE_INNER_NP_MAX: f64 = 0.65;
 /// (radians). Bounded so the cut can never balloon by more.
 const WEDGE_JITTER_AMP: f64 = 0.05;
 
-const RADIUS_MIN: f64 = 4.5;
-const RADIUS_MAX: f64 = 8.5;
+// Pad radii are large enough that the biggest frog (size MAX with
+// half-length ≈ 3.15 wu) fits comfortably inside even the smallest
+// pad (diameter 10 wu).
+const RADIUS_MIN: f64 = 5.0;
+const RADIUS_MAX: f64 = 8.0;
 
 const ROTATION_RATE_MIN: f64 = 0.10;
 const ROTATION_RATE_MAX: f64 = 0.30;
@@ -130,6 +133,10 @@ pub struct LilyPad {
     rotation: f64,
     rotation_rate: f64,
     wedge: Option<Wedge>,
+    /// Set externally each frame: true if a frog is currently
+    /// sitting on this pad. Occupied pads render in a darker,
+    /// water-tinted palette so the frog stands out against them.
+    occupied: bool,
 }
 
 impl LilyPad {
@@ -155,12 +162,31 @@ impl LilyPad {
             rotation,
             rotation_rate,
             wedge,
+            occupied: false,
         }
     }
 
     #[cfg(test)]
     pub fn velocity(&self) -> (f64, f64) {
         (self.vx, self.vy)
+    }
+
+    /// Mark whether a frog is currently resting on this pad. Pond
+    /// recomputes this every frame from current frog positions.
+    pub fn set_occupied(&mut self, occupied: bool) {
+        self.occupied = occupied;
+    }
+
+    #[cfg(test)]
+    pub fn is_occupied(&self) -> bool {
+        self.occupied
+    }
+
+    /// Snapshot of `(x, y, radius)` for other actors that need to
+    /// reason about pad positions without holding a borrow of the
+    /// pond.
+    pub fn snapshot(&self) -> (f64, f64, f64) {
+        (self.x, self.y, self.radius)
     }
 
     // -- physics --------------------------------------------------------
@@ -230,7 +256,7 @@ impl LilyPad {
                 if self.pixel_in_wedge(local_angle, np) {
                     continue;
                 }
-                let (r, g, b) = pixel_colour(local_angle, np, d);
+                let (r, g, b) = pixel_colour(local_angle, np, d, self.occupied);
                 canvas.dot(cx_i + dx, cy_i + dy, r, g, b);
             }
         }
@@ -243,7 +269,27 @@ impl LilyPad {
     }
 }
 
-fn pixel_colour(local_angle: f64, np: f64, d: f64) -> (u8, u8, u8) {
+/// Mix toward this when a pad has a frog on it — pushes the pad
+/// visibly into the water palette so the frog reads clearly on top.
+const OCCUPIED_TINT: (u8, u8, u8) = (22, 40, 55);
+const OCCUPIED_MIX: f64 = 0.70;
+
+fn pixel_colour(local_angle: f64, np: f64, d: f64, occupied: bool) -> (u8, u8, u8) {
+    let base = base_pixel_colour(local_angle, np, d);
+    if occupied {
+        lerp_color(base, OCCUPIED_TINT, OCCUPIED_MIX)
+    } else {
+        base
+    }
+}
+
+fn lerp_color(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| ((x as f64) + ((y as f64) - (x as f64)) * t).round() as u8;
+    (mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
+}
+
+fn base_pixel_colour(local_angle: f64, np: f64, d: f64) -> (u8, u8, u8) {
     if d < 0.5 {
         return color::HUB;
     }
