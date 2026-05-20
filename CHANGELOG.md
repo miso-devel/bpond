@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-05-21
+
+A "frogs in the pond" release. The pond gains a third inhabitant
+alongside koi and lily pads: pond frogs with a full lifecycle of
+sit, croak, tongue, jump, swim, scare — and they actually look
+and behave differently depending on whether they're perched on a
+pad or floating in the water.
+
+### Added
+- **Pond frogs** (`src/frog.rs` + `src/frog/draw.rs`): three frogs
+  spawn on lily pads at startup. Each frog runs a state machine:
+  * On a pad — `Sit` (folded Z hind legs, visible front legs,
+    throat-pulse breath) with `Crouch → Jump → Land`, plus
+    occasional `Croak` (vocal-sac inflation) and `TongueFlick`
+    branches.
+  * In water — `Float` (submerged tint, hind legs trailing back)
+    cycling with `SwimKick` (one propulsive breaststroke kick).
+    Frogs in water swim actively (~8 wu/s peak), and every kick
+    starts with a random heading turn so the path visibly curves.
+    Frogs in water never jump randomly — they only leap when a
+    reachable lily pad is in range.
+- **`on_pad: Option<usize>`** tracking on every frog. While set,
+  the frog's position is synced to that pad's centre each tick,
+  so a drifting pad carries the frog with it — perch detection
+  cannot go stale. Pond uses this index directly to mark which
+  pads to tint.
+- **`FrogEvent`** API (`Splash`, `Wake`). Landing emits three
+  concentric splash ripples; each swim kick emits two small wake
+  ripples behind the frog; taking off from water emits a takeoff
+  wake.
+- **Food-drop scare**: `Pond::drop_food` propagates a scare to
+  every frog within range. Koi still chase the pellet; frogs
+  scatter away from the splash.
+- **Perched-pad tint**: a lily pad with a frog on it lerps its
+  green palette 70% toward a water-blue tint so the green frog
+  reads clearly on top.
+- Three colour morphs at spawn (`Green / Olive / Brown`),
+  occasional eye blink (nictitating-membrane slit), right-click
+  scare for frogs as well as koi.
+
+### Changed
+- **`Pond::drop_food` and `Pond::scare`** now take `(x, y, w, h)`
+  so they can route to `Frog::scare`. This is the only
+  backwards-incompatible signature change in 0.6.
+- **`LilyPad`** gains `snapshot()` (pad position + radius for
+  frog targeting) and `set_occupied(bool)` (set by Pond each
+  frame from the perched-frog index).
+- Pad radius range tuned to 5.0–8.0 wu so even the smallest pad
+  comfortably contains the largest frog (max half-len ≈ 3.15).
+
+### Fixed
+- CI: release workflow now cross-compiles `x86_64-apple-darwin`
+  on the `macos-latest` (Apple Silicon) runner. Every release
+  since v0.3.1 had its Intel macOS binary job hang on the
+  `macos-13` runner for the full 24-hour workflow limit and get
+  cancelled. Added `timeout-minutes: 30` so a future runner hang
+  fails fast.
+
+### Documentation
+- README updated to describe the on-pad vs in-water rest states
+  and the new behaviours; architecture diagram now matches the
+  actual `koi/` + `frog/` module layout with one-line file
+  descriptions.
+- CLAUDE.md updated with the frog state machine, pad-occupancy
+  logic, and the `FrogEvent` flow.
+
 ## [0.5.0] — 2026-05-18
 
 A "pond, not just koi" release. The pond now actually looks like one:
