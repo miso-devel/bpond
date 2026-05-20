@@ -66,27 +66,38 @@ cargo run --release
 
 **Fins**: Pectoral and pelvic fins each render as a 3-ray fan. While turning, the pectoral fin on the inside extends to brake; the outside fin tucks streamlined. Beat amplitude scales with the current thrust so sprinting and hovering look distinct.
 
-**Frogs**: A handful of pond frogs sit on the surface, breathing visibly (throat pulse), occasionally croaking with an inflating vocal sac, sometimes flicking a tongue forward. Every few seconds a frog crouches and launches a parabolic-arc leap, landing with a splash — or, if a lily pad is in range, gracefully on top of it. Landing in open water triggers a brief breaststroke swim. Each frog rolls one of three colour morphs (green, olive, brown) at spawn, and right-click sends every frog within range scattering away from the threat.
+**Frogs**: Pond frogs distinguish between resting on a pad and floating in water, and the simulation matches each.
 
-**Lily pads**: Each pad is a clean disc with a single V-shaped wedge cut from the rim — a random size and depth per pad. Pads drift on the water surface under spring-to-home physics plus per-pad ambient currents, a shared global wind, and the wake of koi and jumping frogs passing nearby.
+* **On a pad** — dry posture (folded Z hind legs, visible front legs, throat-pulse breath). Off the sit timer, the frog rolls into a crouch-and-jump, an inflating vocal-sac croak, or a fast tongue flick.
+* **In water** — submerged tint, hind legs trailing behind. The frog actively swims via short breaststroke kicks with a peak forward speed of ~8 wu/s; each kick begins with a random heading turn so the path curves like a real swimming frog instead of running straight. A frog in water *never* jumps somewhere random — it only leaps when there's a reachable pad to land on.
 
-**Effects**: Ripple rings expand from food drops, raindrops, and frog splashes. Bubbles rise from the pond floor. Water color shifts through a day/night cycle.
+The lifecycle is one pipeline: crouch → jump → land. Landing on a pad routes to Sit; landing in open water routes to Float. Each frog tracks the pad it's perched on by index, so a drifting pad carries the frog with it (the perch detection can't go stale). Each frog also rolls one of three colour morphs (green, olive, brown) at spawn, blinks every few seconds, and reacts to right-clicks **and** to nearby food drops by immediately leaping away (koi happily go for the pellet; frogs scatter).
+
+**Lily pads**: Each pad is a clean disc with a single V-shaped wedge cut from the rim — a random size and depth per pad. Pads drift on the water surface under spring-to-home physics plus per-pad ambient currents, a shared global wind, and the wake of koi and jumping frogs passing nearby. A pad with a perched frog on it tints toward water blue so the green frog reads clearly on top.
+
+**Effects**: Ripple rings expand from food drops, raindrops, frog landings, and from each swimming-frog kick (a small wake behind the body). Bubbles rise from the pond floor. Water color shifts through a day/night cycle.
 
 ## Architecture
 
 ```
 src/
-├── main.rs       Event loop + rendering
-├── canvas.rs     Braille sub-pixel canvas
-├── food.rs       Food pellet lifecycle
-├── frog.rs       Pond frogs: sit / crouch / jump / land / croak / tongue / swim
-├── koi/          Koi physics + drawing (chain dynamics, body wave, schooling)
-├── lily.rs       Floating lily pads (V-wedge notches + drift physics)
-├── pond.rs       Pond state + coordinate math
-├── ripple.rs     Expanding ring effects
+├── main.rs       Event loop + rendering (water background, header, key/mouse input)
+├── canvas.rs     Braille sub-pixel canvas (each cell = 2×4 dots, 8× resolution)
+├── pond.rs       Top-level simulation: owns koi / frogs / lilies / food / ripples
+├── koi.rs        Koi struct + public API (spawn, snapshot, update entry, scare)
+│   ├─ koi/physics.rs   Steering, body wave, Boids schooling, sub-step integration
+│   └─ koi/draw.rs      Body / tail / fins / eyes — burst-scaled rendering
+├── frog.rs       Frog state machine (Sit / Crouch / Jump / Land / Croak /
+│                  TongueFlick / Float / SwimKick), spawn, FrogEvent
+│   └─ frog/draw.rs     Body silhouette, legs (folded / extended / trailing /
+│                       swimming), eyes, throat, vocal sac, tongue, submerged tint
+├── lily.rs       Floating lily pads — V-wedge silhouette, drift physics,
+│                  per-pad "occupied by a frog" tint
+├── food.rs       Food pellet lifecycle (fade, eat-range)
+├── ripple.rs     Expanding ring effects (food splash + raindrop + frog wake)
 ├── bubble.rs     Rising bubble particles
-├── rain.rs       Rain system
-└── rng.rs        Shared pseudo-RNG
+├── rain.rs       Rain system (drops + ripple spawning)
+└── rng.rs        Shared deterministic pseudo-RNG
 ```
 
 ## License
