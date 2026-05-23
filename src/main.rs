@@ -136,16 +136,20 @@ fn draw_water(
     elapsed: f64,
     bg_override: Option<(u8, u8, u8)>,
 ) {
-    // Base water colour. When the user passes `--bg <hex>` we pin
-    // the base to that fixed RGB so the recording / screenshot
-    // doesn't depend on where the day/night cycle currently sits.
-    // Either way the per-cell ripple modulation still rides on top
-    // so the surface looks alive instead of a flat painted block.
+    // Base water colour. The default cycles slowly across a
+    // day/night band tuned to stay distinctly brighter than the
+    // koi's outline/silhouette (≈ 8-32 on each channel) so dark
+    // koi edges read as dark *against* the water rather than
+    // disappearing into it. `--bg <hex>` overrides the cycle with a
+    // pinned RGB so screenshots and recordings don't depend on
+    // where in the cycle the simulation happens to sit. Either way
+    // the per-cell ripple modulation still rides on top so the
+    // surface looks alive instead of a flat painted block.
     let (base_r, base_g, base_b) = match bg_override {
         Some((r, g, b)) => (f64::from(r), f64::from(g), f64::from(b)),
         None => {
             let day = (elapsed * 0.03).sin() * 0.5 + 0.5;
-            (5.0 + day * 12.0, 10.0 + day * 14.0, 22.0 + day * 16.0)
+            (12.0 + day * 14.0, 22.0 + day * 16.0, 40.0 + day * 18.0)
         }
     };
 

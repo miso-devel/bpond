@@ -42,6 +42,7 @@ bpond --bg 17243a    # pin the water to a fixed colour (#RRGGBB)
 git clone https://github.com/miso-devel/bpond
 cd bpond
 cargo run --release
+cargo run --release -- --bg 17243a   # forward flags via `--` so cargo doesn't eat them
 ```
 
 ## Controls
