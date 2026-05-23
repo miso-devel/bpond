@@ -1,7 +1,7 @@
 <h1 align="center">
   bpond
   <br>
-  <sub>Koi, alive in your terminal</sub>
+  <sub>A procedural koi pond in your terminal</sub>
 </h1>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 ---
 
-A living pond in your terminal: koi swim with chain-dynamics physics, lily pads drift on the surface, and frogs sit on the lily pads — breathing, croaking, and leaping. Click to drop food, right-click to scare. No keyframes, no pre-baked frames. Everything is procedural.
+A living pond in your terminal. Koi swim with chain-dynamics physics, lily pads drift on the surface, and frogs perch on the pads — breathing, croaking, leaping, and swimming when they end up in the water. Click to drop food, right-click to scare, press `r` for rain. No keyframes, no pre-baked frames. Everything is procedural and rendered into Unicode braille at sub-pixel resolution.
 
 ## Install
 
@@ -30,8 +30,10 @@ Requires Rust 1.80 or later. The installed binary lands in `~/.cargo/bin/`, so m
 
 ```bash
 bpond                # standard mode
-bpond --debug        # show a header with speed / runtime info
+bpond --debug        # show a one-line header with current speed and key hints
 ```
+
+Quit with `q` or `Esc`. The pond auto-sizes to the terminal — resize the window any time.
 
 ### From source
 
@@ -75,7 +77,9 @@ The lifecycle is one pipeline: crouch → jump → land. Landing on a pad routes
 
 **Lily pads**: Each pad is a clean disc with a single V-shaped wedge cut from the rim — a random size and depth per pad. Pads drift on the water surface under spring-to-home physics plus per-pad ambient currents, a shared global wind, and the wake of koi and jumping frogs passing nearby. A pad with a perched frog on it tints toward water blue so the green frog reads clearly on top.
 
-**Effects**: Ripple rings expand from food drops, raindrops, frog landings, and from each swimming-frog kick (a small wake behind the body). Bubbles rise from the pond floor. Water color shifts through a day/night cycle.
+**Rain**: Pressing `r` toggles a rain shower. Drops spawn over the pond at a steady rate, each one painting a small wedge of motion before hitting the water and spawning a short-lived ripple. Toggle off and the existing drops clean themselves up.
+
+**Effects**: Ripple rings expand from food drops, raindrops, frog landings, and from each swimming-frog kick (a small wake behind the body). Bubbles rise from the pond floor. Water color shifts through a slow day/night cycle, so the same pond at different times looks different.
 
 ## Architecture
 
@@ -98,6 +102,15 @@ src/
 ├── bubble.rs     Rising bubble particles
 ├── rain.rs       Rain system (drops + ripple spawning)
 └── rng.rs        Shared deterministic pseudo-RNG
+```
+
+## Regenerating the demo
+
+The animated demo at the top is captured with [VHS](https://github.com/charmbracelet/vhs) from `assets/demo.tape`:
+
+```bash
+cargo build --release
+vhs assets/demo.tape   # writes assets/demo.gif
 ```
 
 ## License
