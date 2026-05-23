@@ -8,6 +8,7 @@ Procedural koi pond animation in the terminal. Braille sub-pixel rendering + cha
 cargo run                       # debug build → run
 cargo run --release             # release build → run
 cargo run --release -- --debug  # show header (speed / runtime info)
+cargo run --release -- --bg 17243a  # pin water to a fixed RGB (for recordings)
 cargo watch -x run              # rebuild and rerun on file changes
 RUST_BACKTRACE=1 cargo run      # run with a backtrace on panic
 ```
@@ -127,6 +128,7 @@ src/
 - `↑` / `↓` — adjust simulation speed
 - `q` / `Esc` — quit
 - `--debug` flag — show header (speed / runtime info)
+- `--bg <hex>` flag — pin the water's base RGB (skips the day/night cycle); ripple modulation still applies. Useful for screenshots and demo recordings.
 
 ## Releasing
 

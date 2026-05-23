@@ -15,7 +15,7 @@ fn body_color(np: f64, red: bool) -> (u8, u8, u8) {
     const SILHOUETTE: (f64, f64, f64) = (8.0, 6.0, 5.0);
     const OUTLINE: (f64, f64, f64) = (32.0, 26.0, 20.0);
     const WHITE: (f64, f64, f64) = (255.0, 252.0, 242.0);
-    const RED: (f64, f64, f64) = (235.0, 45.0, 25.0);
+    const RED: (f64, f64, f64) = (245.0, 35.0, 15.0);
 
     let interior = if red && np < 0.72 { RED } else { WHITE };
 

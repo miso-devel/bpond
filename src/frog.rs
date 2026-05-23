@@ -153,21 +153,21 @@ pub enum Morph {
 impl Morph {
     fn back_light(self) -> (u8, u8, u8) {
         match self {
-            Morph::Green => (95, 165, 70),
-            Morph::Olive => (115, 130, 65),
+            Morph::Green => (95, 200, 70),
+            Morph::Olive => (130, 150, 60),
             Morph::Brown => (135, 100, 60),
         }
     }
     fn back_mid(self) -> (u8, u8, u8) {
         match self {
-            Morph::Green => (60, 120, 50),
-            Morph::Olive => (75, 95, 45),
+            Morph::Green => (55, 145, 45),
+            Morph::Olive => (85, 110, 45),
             Morph::Brown => (95, 70, 40),
         }
     }
     fn back_dark(self) -> (u8, u8, u8) {
         match self {
-            Morph::Green => (30, 75, 30),
+            Morph::Green => (25, 90, 30),
             Morph::Olive => (45, 60, 25),
             Morph::Brown => (60, 40, 22),
         }

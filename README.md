@@ -29,11 +29,12 @@ Requires Rust 1.80 or later. The installed binary lands in `~/.cargo/bin/`, so m
 ## Run
 
 ```bash
-bpond                # standard mode
+bpond                # standard mode (day/night cycle on the water)
 bpond --debug        # show a one-line header with current speed and key hints
+bpond --bg 17243a    # pin the water to a fixed colour (#RRGGBB)
 ```
 
-Quit with `q` or `Esc`. The pond auto-sizes to the terminal — resize the window any time.
+`--bg` skips the slow day/night colour drift so screenshots, recordings, or terminal embeds look the same every time. The per-cell ripple shimmer still rides on top. Quit with `q` or `Esc`. The pond auto-sizes to the terminal — resize the window any time.
 
 ### From source
 
@@ -41,6 +42,7 @@ Quit with `q` or `Esc`. The pond auto-sizes to the terminal — resize the windo
 git clone https://github.com/miso-devel/bpond
 cd bpond
 cargo run --release
+cargo run --release -- --bg 17243a   # forward flags via `--` so cargo doesn't eat them
 ```
 
 ## Controls
@@ -113,9 +115,11 @@ brew install asciinema agg
 cargo build --release
 
 # 1) Record. Resize your terminal first; the recording captures
-#    the size at the moment of `asciinema rec`.
+#    the size at the moment of `asciinema rec`. Run bpond with a
+#    fixed `--bg` so the water colour doesn't drift across the
+#    recording.
 asciinema rec --overwrite -i 0.5 assets/demo.cast
-./target/release/bpond
+./target/release/bpond --bg 17243a
 # … exercise the pond (f, r, +, q) then quit; exit the shell.
 
 # 2) Render to a raw gif, then crop + scale to 1200×600 (the size
