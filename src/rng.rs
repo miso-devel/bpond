@@ -13,7 +13,10 @@ mod tests {
     fn pseudo_rand_output_in_unit_interval() {
         for i in 0..100 {
             let v = pseudo_rand(i as f64 * 1.7 + 0.3);
-            assert!(v >= 0.0 && v < 1.0, "pseudo_rand({i}) = {v} not in [0, 1)");
+            assert!(
+                (0.0..1.0).contains(&v),
+                "pseudo_rand({i}) = {v} not in [0, 1)",
+            );
         }
     }
 
