@@ -1,1 +1,4 @@
 /target
+
+# Local recording sources — the rendered gif is what we ship.
+assets/*.cast

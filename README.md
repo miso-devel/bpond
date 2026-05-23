@@ -106,12 +106,28 @@ src/
 
 ## Regenerating the demo
 
-The animated demo at the top is captured with [VHS](https://github.com/charmbracelet/vhs) from `assets/demo.tape`:
+The gif at the top is captured from a real terminal session with [asciinema](https://docs.asciinema.org/) and rendered with [agg](https://github.com/asciinema/agg) — that path goes through the same braille glyphs your terminal already draws, so the result looks like the live app rather than a headless re-render.
 
 ```bash
+brew install asciinema agg
 cargo build --release
-vhs assets/demo.tape   # writes assets/demo.gif
+
+# 1) Record. Resize your terminal first; the recording captures
+#    the size at the moment of `asciinema rec`.
+asciinema rec --overwrite -i 0.5 assets/demo.cast
+./target/release/bpond
+# … exercise the pond (f, r, +, q) then quit; exit the shell.
+
+# 2) Render and squeeze.
+agg --font-size 18 assets/demo.cast /tmp/demo-raw.gif
+ffmpeg -y -i /tmp/demo-raw.gif \
+  -vf "fps=15,scale=900:-1:flags=lanczos,palettegen=max_colors=128" /tmp/palette.png
+ffmpeg -y -i /tmp/demo-raw.gif -i /tmp/palette.png \
+  -lavfi "fps=15,scale=900:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=4" \
+  assets/demo.gif
 ```
+
+`assets/*.cast` is gitignored — re-record any time the simulation changes.
 
 ## License
 
