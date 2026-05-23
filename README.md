@@ -118,12 +118,15 @@ asciinema rec --overwrite -i 0.5 assets/demo.cast
 ./target/release/bpond
 # … exercise the pond (f, r, +, q) then quit; exit the shell.
 
-# 2) Render and squeeze.
+# 2) Render to a raw gif, then crop + scale to 1200×600 (the size
+#    the README's <img> expects) and quantise the palette so the
+#    file stays under ~10 MB.
 agg --font-size 18 assets/demo.cast /tmp/demo-raw.gif
 ffmpeg -y -i /tmp/demo-raw.gif \
-  -vf "fps=15,scale=900:-1:flags=lanczos,palettegen=max_colors=128" /tmp/palette.png
+  -vf "fps=12,scale=1200:-1:flags=lanczos,crop=1200:600:0:(in_h-600)/2,palettegen=max_colors=96" \
+  /tmp/palette.png
 ffmpeg -y -i /tmp/demo-raw.gif -i /tmp/palette.png \
-  -lavfi "fps=15,scale=900:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=4" \
+  -lavfi "fps=12,scale=1200:-1:flags=lanczos,crop=1200:600:0:(in_h-600)/2 [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=4" \
   assets/demo.gif
 ```
 
