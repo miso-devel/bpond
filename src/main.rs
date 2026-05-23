@@ -21,7 +21,9 @@ use std::time::{Duration, Instant};
 const TICK: Duration = Duration::from_millis(16); // ~60 fps
 
 fn main() -> io::Result<()> {
-    let debug = std::env::args().any(|a| a == "--debug");
+    let args: Vec<String> = std::env::args().collect();
+    let debug = args.iter().any(|a| a == "--debug");
+    let bg_override = parse_bg_arg(&args);
     let mut terminal = ratatui::init();
 
     let (tw, th) = crossterm::terminal::size().unwrap_or((80, 24));
@@ -48,7 +50,7 @@ fn main() -> io::Result<()> {
             let area = f.area();
             let buf = f.buffer_mut();
 
-            draw_water(buf, area, elapsed);
+            draw_water(buf, area, elapsed, bg_override);
 
             let cw = area.width as usize;
             let ch = if debug {
@@ -128,11 +130,24 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn draw_water(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, elapsed: f64) {
-    let day = (elapsed * 0.03).sin() * 0.5 + 0.5;
-    let base_r = 5.0 + day * 12.0;
-    let base_g = 10.0 + day * 14.0;
-    let base_b = 22.0 + day * 16.0;
+fn draw_water(
+    buf: &mut ratatui::buffer::Buffer,
+    area: ratatui::layout::Rect,
+    elapsed: f64,
+    bg_override: Option<(u8, u8, u8)>,
+) {
+    // Base water colour. When the user passes `--bg <hex>` we pin
+    // the base to that fixed RGB so the recording / screenshot
+    // doesn't depend on where the day/night cycle currently sits.
+    // Either way the per-cell ripple modulation still rides on top
+    // so the surface looks alive instead of a flat painted block.
+    let (base_r, base_g, base_b) = match bg_override {
+        Some((r, g, b)) => (f64::from(r), f64::from(g), f64::from(b)),
+        None => {
+            let day = (elapsed * 0.03).sin() * 0.5 + 0.5;
+            (5.0 + day * 12.0, 10.0 + day * 14.0, 22.0 + day * 16.0)
+        }
+    };
 
     for y in 0..area.height {
         for x in 0..area.width {
@@ -184,6 +199,35 @@ fn draw_food(pond: &pond::Pond, canvas: &mut Canvas, scale: f64) {
     }
 }
 
+/// Parse `--bg <hex>` (or `--bg=<hex>`) out of the argument list.
+/// Accepts `RRGGBB` with or without a leading `#`. Anything else
+/// returns `None` and we fall back to the day/night cycle base.
+fn parse_bg_arg(args: &[String]) -> Option<(u8, u8, u8)> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        let value = if let Some(v) = arg.strip_prefix("--bg=") {
+            v
+        } else if arg == "--bg" {
+            iter.next().map(String::as_str)?
+        } else {
+            continue;
+        };
+        return parse_hex_rgb(value);
+    }
+    None
+}
+
+fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let s = s.strip_prefix('#').unwrap_or(s);
+    if s.len() != 6 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some((r, g, b))
+}
+
 fn draw_header(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, speed: f64) {
     if area.width <= 20 {
         return;
@@ -200,5 +244,59 @@ fn draw_header(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, s
         cell.set_char(ch);
         cell.set_fg(Color::Rgb(60, 55, 85));
         cell.set_bg(Color::Rgb(10, 16, 28));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn parse_hex_accepts_six_digit_lowercase() {
+        assert_eq!(parse_hex_rgb("1a2b3c"), Some((0x1a, 0x2b, 0x3c)));
+    }
+
+    #[test]
+    fn parse_hex_accepts_leading_hash_and_uppercase() {
+        assert_eq!(parse_hex_rgb("#FFAA00"), Some((0xff, 0xaa, 0x00)));
+    }
+
+    #[test]
+    fn parse_hex_rejects_short_strings() {
+        assert_eq!(parse_hex_rgb("12345"), None);
+        assert_eq!(parse_hex_rgb("#1a2"), None);
+    }
+
+    #[test]
+    fn parse_hex_rejects_non_hex() {
+        assert_eq!(parse_hex_rgb("1a2zzz"), None);
+    }
+
+    #[test]
+    fn parse_bg_finds_space_separated_value() {
+        let argv = args(&["bpond", "--bg", "1a2434", "--debug"]);
+        assert_eq!(parse_bg_arg(&argv), Some((0x1a, 0x24, 0x34)));
+    }
+
+    #[test]
+    fn parse_bg_finds_equals_separated_value() {
+        let argv = args(&["bpond", "--bg=#1a2434"]);
+        assert_eq!(parse_bg_arg(&argv), Some((0x1a, 0x24, 0x34)));
+    }
+
+    #[test]
+    fn parse_bg_ignores_invalid_hex() {
+        let argv = args(&["bpond", "--bg", "notacolor"]);
+        assert_eq!(parse_bg_arg(&argv), None);
+    }
+
+    #[test]
+    fn parse_bg_returns_none_when_flag_missing() {
+        let argv = args(&["bpond", "--debug"]);
+        assert_eq!(parse_bg_arg(&argv), None);
     }
 }
