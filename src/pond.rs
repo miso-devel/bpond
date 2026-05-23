@@ -79,7 +79,7 @@ impl Pond {
         // any nearby koi or jumping frog. Collect (x, y, vx, vy)
         // per actor — the lily tick reads it without aliasing the
         // other lists.
-        let mut actor_wake: Vec<(f64, f64, f64, f64)> = self
+        let actor_wake: Vec<(f64, f64, f64, f64)> = self
             .fish
             .iter()
             .map(|k| {
@@ -87,12 +87,12 @@ impl Pond {
                 let (kvx, kvy) = k.velocity();
                 (kx, ky, kvx, kvy)
             })
+            .chain(self.frogs.iter().map(|fr| {
+                let (fx, fy) = fr.position();
+                let (vx, vy) = fr.velocity();
+                (fx, fy, vx, vy)
+            }))
             .collect();
-        for fr in &self.frogs {
-            let (fx, fy) = fr.position();
-            let (vx, vy) = fr.velocity();
-            actor_wake.push((fx, fy, vx, vy));
-        }
         for pad in &mut self.lilies {
             pad.tick(dt, t, &actor_wake);
         }
@@ -123,13 +123,9 @@ impl Pond {
         // anchored to it. Frogs carry an `on_pad` index that's the
         // single source of truth — no distance check needed, so the
         // result stays accurate even while pads drift.
-        let occupied_pads: std::collections::HashSet<usize> = self
-            .frogs
-            .iter()
-            .filter_map(|fr| fr.perched_pad())
-            .collect();
         for (i, pad) in self.lilies.iter_mut().enumerate() {
-            pad.set_occupied(occupied_pads.contains(&i));
+            let occupied = self.frogs.iter().any(|fr| fr.perched_pad() == Some(i));
+            pad.set_occupied(occupied);
         }
 
         self.bubble_spawn_timer -= dt;

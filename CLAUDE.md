@@ -18,14 +18,14 @@ RUST_BACKTRACE=1 cargo run      # run with a backtrace on panic
 cargo check                # compile check
 cargo fmt                  # format the code
 cargo fmt --check          # format verification only (matches CI)
-cargo clippy -- -D warnings  # clippy with warnings as errors
+cargo clippy --all-targets -- -D warnings  # clippy with warnings as errors
 cargo test                 # run tests
 cargo clean                # remove build artifacts
 ```
 
 Run the same checks CI runs, locally:
 ```bash
-cargo fmt --check && cargo clippy -- -D warnings && cargo test
+cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 ## Architecture

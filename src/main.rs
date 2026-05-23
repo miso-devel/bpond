@@ -9,18 +9,18 @@ mod rain;
 mod ripple;
 mod rng;
 
-use anyhow::Result;
 use canvas::Canvas;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
     MouseEventKind,
 };
 use ratatui::style::Color;
+use std::io;
 use std::time::{Duration, Instant};
 
 const TICK: Duration = Duration::from_millis(16); // ~60 fps
 
-fn main() -> Result<()> {
+fn main() -> io::Result<()> {
     let debug = std::env::args().any(|a| a == "--debug");
     let mut terminal = ratatui::init();
 

@@ -121,7 +121,7 @@ const SIZE_MAX: f64 = 1.40;
 const EDGE_MARGIN: f64 = 3.0;
 
 // Splash impulse the pond layer uses to spawn ripples on landing.
-pub const LANDING_SPLASH_FORCE: f64 = 1.0;
+const LANDING_SPLASH_FORCE: f64 = 1.0;
 
 // Scare reaction range: frogs farther than this from the threat
 // ignore it. Inside this radius they immediately launch.
@@ -310,7 +310,7 @@ impl Frog {
     }
 
     /// True when the frog is currently in water (floating or kicking).
-    pub fn in_water(&self) -> bool {
+    fn in_water(&self) -> bool {
         matches!(
             self.state,
             FrogState::Float { .. } | FrogState::SwimKick { .. }
@@ -318,9 +318,7 @@ impl Frog {
     }
 
     /// Lateral velocity (world units per second). Non-zero only during
-    /// Jump. Reserved for the lily-pad wake integration in a later
-    /// iteration.
-    #[allow(dead_code)]
+    /// Jump. Pond reads this to push lily pads via wake forces.
     pub fn velocity(&self) -> (f64, f64) {
         match self.state {
             FrogState::Jump { from, to, .. } => (
