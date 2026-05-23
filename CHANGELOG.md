@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-05-24
+
+A "colour-out-of-the-box" release. The default pond now reads as
+a vivid pond at a glance — saturated blue water, punchier red koi,
+and a brighter green on the most common frog morph — and there's
+a `--bg <hex>` flag for pinning the water to a fixed colour when
+the day/night cycle's drift would get in the way (screenshots,
+recordings, demo embeds).
+
+### Added
+- **`--bg <hex>` CLI flag** (`src/main.rs`): pin the water's base
+  RGB to a fixed value, skipping the slow day/night colour drift.
+  Accepts `RRGGBB` or `#RRGGBB`, with either `--bg <hex>` or
+  `--bg=<hex>` argv form. Invalid hex silently falls back to the
+  default cycle so a typo doesn't kill a TUI session. The per-cell
+  ripple modulation still rides on top, so the surface keeps its
+  shimmer.
+- `parse_hex_rgb` + `parse_bg_arg` helpers, with parser tests for
+  short input, non-hex chars, space- vs equals-separated argv, and
+  the missing-flag case.
+
+### Changed
+- **Default water cycle** biased strongly toward blue
+  (`(8..18, 26..44, 52..80)`) so the koi red and frog green land
+  as vivid complementary / triadic contrast instead of merging
+  into a muddy grey-blue. The new cycle still stays well above
+  the koi's silhouette / outline range (≈ 8-32) on every channel
+  so dark koi edges read as dark *against* the water rather than
+  disappearing into it.
+- **Koi `RED`** bumped to `(245, 35, 15)` for a punchier red.
+- **Frog `Morph::Green`** light / mid bands lifted to
+  `(95, 200, 70)` / `(55, 145, 45)` — vibrant lime rather than
+  muddy olive. `Morph::Olive` picks up a modest saturation bump;
+  `Morph::Brown` stays muted (it's the camo morph).
+
+### Documentation
+- README `Run` and `From source` sections document `--bg`, the
+  `cargo run --release -- --bg <hex>` separator (so cargo
+  doesn't eat the flag), and the recording workflow using
+  `--bg 17243a` as a stable preset for the demo gif.
+- CLAUDE.md key-bindings list gains the `--bg` entry.
+- Demo gif refreshed against the saturated default palette.
+
 ## [0.6.0] — 2026-05-21
 
 A "frogs in the pond" release. The pond gains a third inhabitant
