@@ -1,7 +1,7 @@
 <h1 align="center">
   bpond
   <br>
-  <sub>A procedural koi pond in your terminal</sub>
+  <sub>A living pond in your terminal — koi, frogs, lily pads</sub>
 </h1>
 
 <p align="center">
