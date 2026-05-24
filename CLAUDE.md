@@ -1,6 +1,6 @@
 # bpond
 
-Procedural koi pond animation in the terminal. Braille sub-pixel rendering + chain-dynamics spine.
+Procedural pond animation in the terminal — koi, frogs, and lily pads. Braille sub-pixel rendering + chain-dynamics spine.
 
 ## Build & Run
 
